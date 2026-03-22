@@ -1,0 +1,159 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f4f7fb;
+  color: #222;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 {
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  margin-top: 0;
+  color: #555;
+}
+
+.card {
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  margin-top: 20px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+
+label {
+  display: block;
+  margin-top: 14px;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+button {
+  margin-top: 16px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+button:hover {
+  opacity: 0.95;
+}
+
+button.secondary {
+  background: #6b7280;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.kids-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.kid-box {
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 14px;
+  background: #fafafa;
+}
+
+input,
+select {
+  margin-bottom: 10px;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+button.secondary {
+  background: #6b7280;
+}
+
+.popup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.popup-box {
+  width: min(90%, 420px);
+  padding: 28px;
+  border-radius: 18px;
+  text-align: center;
+  color: white;
+  box-shadow: 0 0 30px rgba(255, 255, 255, 0.35);
+  animation: popupPulse 1s infinite alternate;
+}
+
+.popup-box h2 {
+  margin-top: 0;
+  font-size: 2rem;
+}
+
+.popup-box p {
+  font-size: 1.1rem;
+  margin: 16px 0 22px;
+}
+
+.popup-box button {
+  background: white;
+  color: #111;
+  font-weight: bold;
+  min-width: 120px;
+}
+
+.popup-box.warning {
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+}
+
+.popup-box.finished {
+  background: linear-gradient(135deg, #dc2626, #7c3aed);
+}
+
+@keyframes popupPulse {
+  from {
+    transform: scale(1);
+    box-shadow: 0 0 25px rgba(255, 255, 255, 0.25);
+  }
+  to {
+    transform: scale(1.04);
+    box-shadow: 0 0 45px rgba(255, 255, 255, 0.55);
+  }
+}
