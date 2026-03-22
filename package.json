@@ -5,13 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
+    "api": "node server/index.js",
+    "serve": "node server/index.js",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^6.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

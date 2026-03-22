@@ -10,6 +10,12 @@ const DEFAULT_SCHOOL_LIMIT = 120
 const DEFAULT_BREAK_LIMIT = 180
 const WARNING_MINUTES = 15
 const DEFAULT_PARENT_PASSCODE = '1234'
+const API_POLL_INTERVAL = 15000
+const SOUND_FILES = {
+  alert: ['/alert.mp3'],
+  start: ['/start.mp3', '/alert.mp3'],
+  stop: ['/stop.mp3', '/alert.mp3']
+}
 
 function PopupModal({ popup, onClose }) {
   if (!popup.show) return null
@@ -43,8 +49,31 @@ function formatTime(dateString) {
   })
 }
 
+function dateFromString(dateString) {
+  return new Date(`${dateString}T12:00:00`)
+}
+
+function formatDateLabel(dateString) {
+  return dateFromString(dateString).toLocaleDateString([], {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  })
+}
+
+function generateId(prefix = 'id') {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID()
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 export default function App() {
   const [mode, setMode] = useState('kid')
+  const [apiAvailable, setApiAvailable] = useState(false)
+  const [isHydrated, setIsHydrated] = useState(false)
 
   const [kids, setKids] = useState(() => {
     const saved = localStorage.getItem('screen-time-kids')
@@ -77,7 +106,10 @@ const [popup, setPopup] = useState({
   message: ''
 })
 
-const [soundEnabled, setSoundEnabled] = useState(true)
+const [soundEnabled, setSoundEnabled] = useState(() => {
+  const saved = localStorage.getItem('screen-time-sound-enabled')
+  return saved ? JSON.parse(saved) : true
+})
 
 const [breakLimitMinutes, setBreakLimitMinutes] = useState(() => {
   const saved = localStorage.getItem('screen-time-break-limit')
@@ -92,8 +124,76 @@ const [breakLimitMinutes, setBreakLimitMinutes] = useState(() => {
 
   const [newKidName, setNewKidName] = useState('')
   const [newKidPin, setNewKidPin] = useState('')
+  const [selectedDate, setSelectedDate] = useState(todayString())
 
   const [tick, setTick] = useState(Date.now())
+
+  async function fetchJson(path, options = {}) {
+    const response = await fetch(path, {
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      ...options
+    })
+
+    if (!response.ok) {
+      let message = 'Request failed.'
+
+      try {
+        const data = await response.json()
+        if (data?.error) {
+          message = data.error
+        }
+      } catch {
+        // Ignore JSON parsing errors for empty or plain-text responses.
+      }
+
+      throw new Error(message)
+    }
+
+    if (response.status === 204) {
+      return null
+    }
+
+    return response.json()
+  }
+
+  async function refreshBackendData(showOfflineError = false) {
+    try {
+      const [kidsData, sessionsData, settingsData] = await Promise.all([
+        fetchJson('/api/kids'),
+        fetchJson('/api/sessions?limit=1000'),
+        fetchJson('/api/settings')
+      ])
+
+      setKids(kidsData)
+      setSessions(sessionsData)
+      setSchoolDays(settingsData.schoolDays ?? [1, 2, 3, 4, 5])
+      setParentPasscode(settingsData.parentPasscode ?? DEFAULT_PARENT_PASSCODE)
+      setSchoolLimitMinutes(settingsData.schoolLimitMinutes ?? DEFAULT_SCHOOL_LIMIT)
+      setBreakLimitMinutes(settingsData.breakLimitMinutes ?? DEFAULT_BREAK_LIMIT)
+      setSoundEnabled(settingsData.soundEnabled ?? true)
+      setApiAvailable(true)
+      return true
+    } catch (error) {
+      setApiAvailable(false)
+
+      if (showOfflineError) {
+        showInfoPopup(
+          'Shared Backend Unavailable',
+          'The shared backend is unavailable. The app is using local browser storage on this device.'
+        )
+      }
+
+      return false
+    } finally {
+      setIsHydrated(true)
+    }
+  }
+
+  useEffect(() => {
+    refreshBackendData()
+  }, [])
 
   useEffect(() => {
     localStorage.setItem('screen-time-kids', JSON.stringify(kids))
@@ -125,6 +225,46 @@ useEffect(() => {
 useEffect(() => {
   localStorage.setItem('screen-time-break-limit', JSON.stringify(breakLimitMinutes))
 }, [breakLimitMinutes])
+
+useEffect(() => {
+  localStorage.setItem('screen-time-sound-enabled', JSON.stringify(soundEnabled))
+}, [soundEnabled])
+
+  useEffect(() => {
+    if (!apiAvailable) return undefined
+
+    const interval = setInterval(() => {
+      refreshBackendData()
+    }, API_POLL_INTERVAL)
+
+    return () => clearInterval(interval)
+  }, [apiAvailable])
+
+  useEffect(() => {
+    if (!apiAvailable || !isHydrated) return
+
+    fetchJson('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        parentPasscode,
+        schoolLimitMinutes,
+        breakLimitMinutes,
+        schoolDays,
+        soundEnabled
+      })
+    }).catch(error => {
+      console.error('Failed to sync settings:', error)
+    })
+  }, [
+    apiAvailable,
+    isHydrated,
+    parentPasscode,
+    schoolLimitMinutes,
+    breakLimitMinutes,
+    schoolDays,
+    soundEnabled
+  ])
+
   function getDayType(date = new Date()) {
     const day = date.getDay()
     return schoolDays.includes(day) ? 'school' : 'weekend'
@@ -141,14 +281,23 @@ function getDailyLimit(date = new Date()) {
   }
 
   function getUsedMinutesToday(kidId) {
-    const today = todayString()
+    return getUsedMinutesForDate(kidId, todayString())
+  }
+
+  function getUsedMinutesForDate(kidId, dateString) {
+    const isToday = dateString === todayString()
     const now = new Date()
 
     return sessions
-      .filter(session => session.kidId === kidId && session.date === today)
+      .filter(session => session.kidId === kidId && session.date === dateString)
       .reduce((total, session) => {
         const start = new Date(session.startTime)
-        const end = session.endTime ? new Date(session.endTime) : now
+        const end = session.endTime
+          ? new Date(session.endTime)
+          : isToday
+            ? now
+            : start
+
         return total + Math.max(0, (end - start) / 60000)
       }, 0)
   }
@@ -157,16 +306,46 @@ function getDailyLimit(date = new Date()) {
     return getDailyLimit(date) - getUsedMinutesToday(kidId)
   }
 
-  function playAlertSound() {
-  if (!soundEnabled) return
+  function getRemainingMinutesForDate(kidId, dateString) {
+    const date = dateFromString(dateString)
+    return getDailyLimit(date) - getUsedMinutesForDate(kidId, dateString)
+  }
 
-  const audio = new Audio('/alert.mp3')
-  audio.play().catch(error => {
-    console.log('Audio play was blocked by browser:', error)
-  })
-}
+  function playSound(kind = 'alert') {
+    if (!soundEnabled) return
 
-function showPopup(type, title, message) {
+    const sources = SOUND_FILES[kind] ?? SOUND_FILES.alert
+
+    const tryPlay = index => {
+      const source = sources[index]
+      if (!source) return
+
+      const audio = new Audio(source)
+
+      audio.addEventListener(
+        'error',
+        () => {
+          tryPlay(index + 1)
+        },
+        { once: true }
+      )
+
+      audio.play().catch(error => {
+        if (index < sources.length - 1) {
+          tryPlay(index + 1)
+          return
+        }
+
+        console.log(`Audio play was blocked by browser for ${kind}:`, error)
+      })
+    }
+
+    tryPlay(0)
+  }
+
+function showPopup(type, title, message, options = {}) {
+  const { sound = 'alert' } = options
+
   setPopup({
     show: true,
     type,
@@ -174,7 +353,13 @@ function showPopup(type, title, message) {
     message
   })
 
-  playAlertSound()
+  if (sound) {
+    playSound(sound)
+  }
+}
+
+function showInfoPopup(title, message, options = {}) {
+  showPopup('warning', title, message, options)
 }
 
 function closePopup() {
@@ -186,8 +371,24 @@ function closePopup() {
   })
 }
 
-  function stopActiveSessionForKid(kidId) {
+  async function stopActiveSessionForKid(kidId) {
+    const activeSession = getActiveSession(kidId)
+    if (!activeSession) return
+
     const stopTime = new Date().toISOString()
+
+    if (apiAvailable) {
+      try {
+        await fetchJson(`/api/sessions/${activeSession.id}/stop`, {
+          method: 'PATCH',
+          body: JSON.stringify({ endTime: stopTime })
+        })
+        await refreshBackendData()
+        return
+      } catch (error) {
+        console.error('Failed to stop shared session:', error)
+      }
+    }
 
     setSessions(prev =>
       prev.map(session =>
@@ -235,7 +436,7 @@ function closePopup() {
   function loginKid() {
     const kid = kids.find(k => k.id === selectedKidId && k.pin === pin)
     if (!kid) {
-      alert('Incorrect kid or PIN')
+      showInfoPopup('Login Failed', 'Incorrect kid or PIN.')
       return
     }
 
@@ -251,7 +452,7 @@ function closePopup() {
 
   function unlockParent() {
     if (enteredParentPasscode !== parentPasscode) {
-      alert('Incorrect parent passcode')
+      showInfoPopup('Access Denied', 'Incorrect parent passcode.')
       return
     }
 
@@ -264,11 +465,11 @@ function closePopup() {
     setEnteredParentPasscode('')
   }
 
-  function startSession() {
+  async function startSession() {
     if (!loggedInKid) return
 
     if (getActiveSession(loggedInKid.id)) {
-      alert('Session is already running.')
+      showInfoPopup('Session Already Running', 'Screen time is already running for this kid.')
       return
     }
 
@@ -276,28 +477,82 @@ function closePopup() {
     const limit = getDailyLimit()
 
     if (used >= limit) {
-      alert('Today’s limit is already finished.')
+      showInfoPopup('Limit Reached', 'Today’s screen time limit is already finished.')
       return
     }
 
     const newSession = {
-      id: crypto.randomUUID(),
+      id: generateId('session'),
       kidId: loggedInKid.id,
       startTime: new Date().toISOString(),
       endTime: null,
       date: todayString()
     }
 
+    if (apiAvailable) {
+      setSessions(prev => [...prev, newSession])
+
+      try {
+        await fetchJson('/api/sessions', {
+          method: 'POST',
+          body: JSON.stringify(newSession)
+        })
+        playSound('start')
+        showInfoPopup('Session Started', `${loggedInKid.name}'s screen time session has started.`, {
+          sound: false
+        })
+        await refreshBackendData()
+        return
+      } catch (error) {
+        setSessions(prev => prev.filter(session => session.id !== newSession.id))
+        showInfoPopup('Could Not Start Session', error.message)
+        return
+      }
+    }
+
     setSessions(prev => [...prev, newSession])
+    playSound('start')
+    showInfoPopup('Session Started', `${loggedInKid.name}'s screen time session has started.`, {
+      sound: false
+    })
   }
 
-  function stopSession() {
+  async function stopSession() {
     if (!loggedInKid) return
 
     const active = getActiveSession(loggedInKid.id)
     if (!active) {
-      alert('No active session found.')
+      showInfoPopup('No Active Session', 'No active session found.')
       return
+    }
+
+    if (apiAvailable) {
+      const stopTime = new Date().toISOString()
+
+      setSessions(prev =>
+        prev.map(session =>
+          session.id === active.id
+            ? { ...session, endTime: stopTime }
+            : session
+        )
+      )
+
+      try {
+        await fetchJson(`/api/sessions/${active.id}/stop`, {
+          method: 'PATCH',
+          body: JSON.stringify({ endTime: stopTime })
+        })
+        playSound('stop')
+        showInfoPopup('Session Stopped', `${loggedInKid.name}'s screen time session has stopped.`, {
+          sound: false
+        })
+        await refreshBackendData()
+        return
+      } catch (error) {
+        await refreshBackendData()
+        showInfoPopup('Could Not Stop Session', error.message)
+        return
+      }
     }
 
     setSessions(prev =>
@@ -307,6 +562,10 @@ function closePopup() {
           : session
       )
     )
+    playSound('stop')
+    showInfoPopup('Session Stopped', `${loggedInKid.name}'s screen time session has stopped.`, {
+      sound: false
+    })
   }
 
   function toggleSchoolDay(dayNumber) {
@@ -318,16 +577,32 @@ function closePopup() {
     })
   }
 
-  function addKid() {
+  async function addKid() {
     if (!newKidName.trim() || !newKidPin.trim()) {
-      alert('Enter kid name and PIN')
+      showInfoPopup('Missing Details', 'Enter kid name and PIN.')
       return
     }
 
     const newKid = {
-      id: crypto.randomUUID(),
+      id: generateId('kid'),
       name: newKidName.trim(),
       pin: newKidPin.trim()
+    }
+
+    if (apiAvailable) {
+      try {
+        await fetchJson('/api/kids', {
+          method: 'POST',
+          body: JSON.stringify(newKid)
+        })
+        await refreshBackendData()
+        setNewKidName('')
+        setNewKidPin('')
+        return
+      } catch (error) {
+        showInfoPopup('Could Not Add Kid', error.message)
+        return
+      }
     }
 
     setKids(prev => [...prev, newKid])
@@ -335,11 +610,28 @@ function closePopup() {
     setNewKidPin('')
   }
 
-  function deleteKid(kidId) {
+  async function deleteKid(kidId) {
     const active = getActiveSession(kidId)
     if (active) {
-      alert('Stop the running session before deleting this kid.')
+      showInfoPopup('Cannot Delete Kid', 'Stop the running session before deleting this kid.')
       return
+    }
+
+    if (apiAvailable) {
+      try {
+        await fetchJson(`/api/kids/${kidId}`, {
+          method: 'DELETE'
+        })
+        await refreshBackendData()
+
+        if (loggedInKid?.id === kidId) {
+          logoutKid()
+        }
+        return
+      } catch (error) {
+        showInfoPopup('Could Not Delete Kid', error.message)
+        return
+      }
     }
 
     setKids(prev => prev.filter(kid => kid.id !== kidId))
@@ -366,6 +658,24 @@ function closePopup() {
     })
 }, [kids, sessions, tick, schoolDays, schoolLimitMinutes, breakLimitMinutes])
 
+  const selectedDateDashboard = useMemo(() => {
+    const selectedDateObject = dateFromString(selectedDate)
+    const limit = getDailyLimit(selectedDateObject)
+
+    return kids.map(kid => {
+      const used = getUsedMinutesForDate(kid.id, selectedDate)
+      const remaining = Math.max(0, limit - used)
+      const active = selectedDate === todayString() && !!getActiveSession(kid.id)
+
+      return {
+        ...kid,
+        used,
+        remaining,
+        active
+      }
+    })
+  }, [kids, selectedDate, sessions, tick, schoolDays, schoolLimitMinutes, breakLimitMinutes])
+
   const recentSessions = [...sessions]
     .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
     .slice(0, 10)
@@ -377,6 +687,19 @@ function closePopup() {
       }
     })
 
+  const selectedDateSessions = [...sessions]
+    .filter(session => session.date === selectedDate)
+    .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
+    .map(session => {
+      const kid = kids.find(k => k.id === session.kidId)
+      return {
+        ...session,
+        kidName: kid ? kid.name : 'Unknown'
+      }
+    })
+
+  const loggedInKidActiveSession = loggedInKid ? getActiveSession(loggedInKid.id) : null
+
   return (
     <div className="app">
       <h1>Kids Screen Time Tracker</h1>
@@ -386,6 +709,12 @@ function closePopup() {
     ? `School day limit: ${formatMinutes(schoolLimitMinutes)}`
     : `Break / non-school day limit: ${formatMinutes(breakLimitMinutes)}`}
 </p>
+
+      <p className={`sync-status ${apiAvailable ? 'online' : 'offline'}`}>
+        {apiAvailable
+          ? 'Shared mode is active. Devices on your network will see the same sessions and alerts while the app is open.'
+          : 'Local-only mode. If the API is not running, alerts and data stay on this device only.'}
+      </p>
 
       <div className="button-row">
         <button
@@ -434,10 +763,18 @@ function closePopup() {
               <h2>Welcome, {loggedInKid.name}</h2>
               <p>Used today: {formatMinutes(getUsedMinutesToday(loggedInKid.id))}</p>
               <p>Remaining today: {formatMinutes(Math.max(0, getRemainingMinutes(loggedInKid.id)))}</p>
+              <p>Status: {loggedInKidActiveSession ? 'Running' : 'Idle'}</p>
+              {loggedInKidActiveSession && (
+                <p>Started at: {formatTime(loggedInKidActiveSession.startTime)}</p>
+              )}
 
               <div className="button-row">
-                <button onClick={startSession}>Start Screen Time</button>
-                <button onClick={stopSession}>Stop Screen Time</button>
+                <button onClick={startSession} disabled={!!loggedInKidActiveSession}>
+                  {loggedInKidActiveSession ? 'Session Running' : 'Start Screen Time'}
+                </button>
+                <button onClick={stopSession} disabled={!loggedInKidActiveSession}>
+                  Stop Screen Time
+                </button>
                 <button className="secondary" onClick={logoutKid}>Logout</button>
               </div>
             </div>
@@ -569,6 +906,39 @@ function closePopup() {
       </div>
 
       <div className="card">
+        <h2>Usage Calendar</h2>
+        <p className="subtitle-text">
+          Pick any date to review that day&apos;s screen usage and session history.
+        </p>
+
+        <label htmlFor="usage-date">Choose Date</label>
+        <input
+          id="usage-date"
+          type="date"
+          value={selectedDate}
+          max={todayString()}
+          onChange={e => setSelectedDate(e.target.value)}
+        />
+
+        <div className="date-summary">
+          <p><strong>Date:</strong> {formatDateLabel(selectedDate)}</p>
+          <p><strong>Day Type:</strong> {getDayType(dateFromString(selectedDate)) === 'school' ? 'School Day' : 'Break / Non-School Day'}</p>
+          <p><strong>Limit:</strong> {formatMinutes(getDailyLimit(dateFromString(selectedDate)))}</p>
+        </div>
+
+        <div className="kids-grid">
+          {selectedDateDashboard.map(kid => (
+            <div className="kid-box" key={`${kid.id}-${selectedDate}`}>
+              <h3>{kid.name}</h3>
+              <p>Used: {formatMinutes(kid.used)}</p>
+              <p>Remaining: {formatMinutes(kid.remaining)}</p>
+              <p>Status: {kid.active ? 'Running' : 'Idle'}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
         <h2>Recent Sessions</h2>
 
         {recentSessions.length === 0 ? (
@@ -581,6 +951,30 @@ function closePopup() {
 
               return (
                 <div className="kid-box" key={session.id}>
+                  <h3>{session.kidName}</h3>
+                  <p>Start: {formatTime(session.startTime)}</p>
+                  <p>End: {session.endTime ? formatTime(session.endTime) : 'Running'}</p>
+                  <p>Duration: {formatMinutes(duration)}</p>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Sessions For Selected Date</h2>
+
+        {selectedDateSessions.length === 0 ? (
+          <p>No sessions found for {formatDateLabel(selectedDate)}.</p>
+        ) : (
+          <div className="kids-grid">
+            {selectedDateSessions.map(session => {
+              const end = session.endTime ? new Date(session.endTime) : new Date(session.startTime)
+              const duration = Math.max(0, (end - new Date(session.startTime)) / 60000)
+
+              return (
+                <div className="kid-box" key={`${session.id}-selected-date`}>
                   <h3>{session.kidName}</h3>
                   <p>Start: {formatTime(session.startTime)}</p>
                   <p>End: {session.endTime ? formatTime(session.endTime) : 'Running'}</p>

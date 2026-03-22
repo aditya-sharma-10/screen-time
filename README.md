@@ -1,16 +1,41 @@
-# React + Vite
+# Kids Screen Time Tracker
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This project now includes:
 
-Currently, two official plugins are available:
+- a React + Vite frontend
+- a local Express API
+- a SQLite database for shared app data on your local machine
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Run The App
 
-## React Compiler
+Use two terminals:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm run api
+```
 
-## Expanding the ESLint configuration
+```bash
+npm run dev
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+The API runs on `http://localhost:3001` and Vite proxies `/api` requests to it during development.
+
+## Current API
+
+Available routes:
+
+- `GET /api/health`
+- `GET /api/kids`
+- `POST /api/kids`
+- `DELETE /api/kids/:kidId`
+- `GET /api/sessions`
+- `POST /api/sessions`
+- `PATCH /api/sessions/:sessionId/stop`
+- `GET /api/settings`
+- `PUT /api/settings`
+
+## Notes
+
+- The SQLite database file is created automatically in `data/screen-time.db`.
+- The database is seeded with the same default kids and settings your frontend currently uses.
+- The React frontend is not switched over to the API yet, so your current UI still reads from `localStorage` for now.
