@@ -15,7 +15,7 @@ import {
 } from './db.js'
 
 const app = express()
-const PORT = Number(process.env.PORT) || 3001
+const PORT = Number(globalThis.process?.env?.PORT) || 3001
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const DIST_DIR = path.resolve(__dirname, '../dist')
@@ -160,7 +160,7 @@ app.put('/api/settings', async (req, res, next) => {
   }
 })
 
-app.use((error, _req, res, _next) => {
+app.use((error, _req, res) => {
   console.error(error)
   res.status(500).json({ error: 'Something went wrong on the server.' })
 })

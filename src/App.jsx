@@ -11,6 +11,7 @@ const DEFAULT_BREAK_LIMIT = 180
 const WARNING_MINUTES = 15
 const DEFAULT_PARENT_PASSCODE = '1234'
 const API_POLL_INTERVAL = 15000
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const SOUND_FILES = {
   alert: ['/alert.mp3'],
   start: ['/start.mp3', '/alert.mp3'],
@@ -42,6 +43,10 @@ function todayString() {
   return new Date().toISOString().slice(0, 10)
 }
 
+function currentMonthString() {
+  return todayString().slice(0, 7)
+}
+
 function formatTime(dateString) {
   return new Date(dateString).toLocaleTimeString([], {
     hour: 'numeric',
@@ -60,6 +65,35 @@ function formatDateLabel(dateString) {
     day: 'numeric',
     year: 'numeric'
   })
+}
+
+function formatMonthLabel(monthString) {
+  return dateFromString(`${monthString}-01`).toLocaleDateString([], {
+    month: 'long',
+    year: 'numeric'
+  })
+}
+
+function getDaysInMonth(monthString) {
+  const [year, month] = monthString.split('-').map(Number)
+  const firstDay = new Date(year, month - 1, 1)
+  const daysInMonth = new Date(year, month, 0).getDate()
+
+  return Array.from({ length: daysInMonth }, (_, index) => {
+    const day = index + 1
+    const dateString = `${monthString}-${String(day).padStart(2, '0')}`
+
+    return {
+      dateString,
+      day,
+      weekday: new Date(year, month - 1, day).getDay(),
+      isToday: dateString === todayString()
+    }
+  }).map((entry, index) => ({
+    ...entry,
+    isFirstDay: index === 0,
+    firstWeekday: index === 0 ? firstDay.getDay() : null
+  }))
 }
 
 function generateId(prefix = 'id') {
@@ -125,6 +159,7 @@ const [breakLimitMinutes, setBreakLimitMinutes] = useState(() => {
   const [newKidName, setNewKidName] = useState('')
   const [newKidPin, setNewKidPin] = useState('')
   const [selectedDate, setSelectedDate] = useState(todayString())
+  const [calendarMonth, setCalendarMonth] = useState(currentMonthString())
 
   const [tick, setTick] = useState(Date.now())
 
@@ -175,7 +210,7 @@ const [breakLimitMinutes, setBreakLimitMinutes] = useState(() => {
       setSoundEnabled(settingsData.soundEnabled ?? true)
       setApiAvailable(true)
       return true
-    } catch (error) {
+    } catch {
       setApiAvailable(false)
 
       if (showOfflineError) {
@@ -304,11 +339,6 @@ function getDailyLimit(date = new Date()) {
 
   function getRemainingMinutes(kidId, date = new Date()) {
     return getDailyLimit(date) - getUsedMinutesToday(kidId)
-  }
-
-  function getRemainingMinutesForDate(kidId, dateString) {
-    const date = dateFromString(dateString)
-    return getDailyLimit(date) - getUsedMinutesForDate(kidId, dateString)
   }
 
   function playSound(kind = 'alert') {
@@ -676,6 +706,49 @@ function closePopup() {
     })
   }, [kids, selectedDate, sessions, tick, schoolDays, schoolLimitMinutes, breakLimitMinutes])
 
+  const visibleKids = useMemo(() => {
+    if (mode === 'kid' && loggedInKid) {
+      return kids.filter(kid => kid.id === loggedInKid.id)
+    }
+
+    return kids
+  }, [kids, loggedInKid, mode])
+
+  const usageByKidAndDate = useMemo(() => {
+    return kids.reduce((lookup, kid) => {
+      lookup[kid.id] = sessions.reduce((dateLookup, session) => {
+        if (session.kidId !== kid.id) {
+          return dateLookup
+        }
+
+        dateLookup[session.date] = getUsedMinutesForDate(kid.id, session.date)
+        return dateLookup
+      }, {})
+
+      return lookup
+    }, {})
+  }, [kids, sessions, tick])
+
+  const calendarDays = useMemo(() => {
+    return getDaysInMonth(calendarMonth)
+  }, [calendarMonth])
+
+  const calendarLeadingBlanks = calendarDays[0]?.firstWeekday ?? 0
+
+  const monthReportRows = useMemo(() => {
+    return calendarDays.map(day => {
+      const usage = visibleKids.reduce((row, kid) => {
+        row[kid.id] = usageByKidAndDate[kid.id]?.[day.dateString] ?? 0
+        return row
+      }, {})
+
+      return {
+        ...day,
+        usage
+      }
+    })
+  }, [calendarDays, usageByKidAndDate, visibleKids])
+
   const recentSessions = [...sessions]
     .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
     .slice(0, 10)
@@ -699,6 +772,23 @@ function closePopup() {
     })
 
   const loggedInKidActiveSession = loggedInKid ? getActiveSession(loggedInKid.id) : null
+
+  function handleSelectedDateChange(nextDate) {
+    setSelectedDate(nextDate)
+    setCalendarMonth(nextDate.slice(0, 7))
+  }
+
+  function changeCalendarMonth(offset) {
+    const [year, month] = calendarMonth.split('-').map(Number)
+    const nextDate = new Date(year, month - 1 + offset, 1)
+    const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`
+
+    if (nextMonth > currentMonthString()) {
+      return
+    }
+
+    setCalendarMonth(nextMonth)
+  }
 
   return (
     <div className="app">
@@ -917,7 +1007,7 @@ function closePopup() {
           type="date"
           value={selectedDate}
           max={todayString()}
-          onChange={e => setSelectedDate(e.target.value)}
+          onChange={e => handleSelectedDateChange(e.target.value)}
         />
 
         <div className="date-summary">
@@ -935,6 +1025,117 @@ function closePopup() {
               <p>Status: {kid.active ? 'Running' : 'Idle'}</p>
             </div>
           ))}
+        </div>
+
+        <div className="calendar-toolbar">
+          <div>
+            <h3>{formatMonthLabel(calendarMonth)}</h3>
+            <p className="subtitle-text">
+              {mode === 'kid' && loggedInKid
+                ? `Monthly usage calendar for ${loggedInKid.name}.`
+                : 'Monthly usage calendar for all kids.'}
+            </p>
+          </div>
+
+          <div className="button-row">
+            <button className="secondary" onClick={() => changeCalendarMonth(-1)}>
+              Previous Month
+            </button>
+            <button
+              className="secondary"
+              onClick={() => setCalendarMonth(currentMonthString())}
+              disabled={calendarMonth === currentMonthString()}
+            >
+              Current Month
+            </button>
+            <button
+              onClick={() => changeCalendarMonth(1)}
+              disabled={calendarMonth === currentMonthString()}
+            >
+              Next Month
+            </button>
+          </div>
+        </div>
+
+        <div className="calendar-weekdays">
+          {WEEKDAY_LABELS.map(label => (
+            <div key={label} className="calendar-weekday">
+              {label}
+            </div>
+          ))}
+        </div>
+
+        <div className="calendar-grid">
+          {Array.from({ length: calendarLeadingBlanks }).map((_, index) => (
+            <div key={`blank-${index}`} className="calendar-cell empty" />
+          ))}
+
+          {calendarDays.map(day => {
+            const isSelected = day.dateString === selectedDate
+
+            return (
+              <button
+                key={day.dateString}
+                className={`calendar-cell ${isSelected ? 'selected' : ''} ${day.isToday ? 'today' : ''}`}
+                onClick={() => handleSelectedDateChange(day.dateString)}
+              >
+                <span className="calendar-day-number">{day.day}</span>
+                {visibleKids.map(kid => {
+                  const minutes = usageByKidAndDate[kid.id]?.[day.dateString] ?? 0
+
+                  return (
+                    <span className="calendar-usage-line" key={`${day.dateString}-${kid.id}`}>
+                      <strong>{kid.name}:</strong> {formatMinutes(minutes)}
+                    </span>
+                  )
+                })}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>Usage Report Grid</h2>
+        <p className="subtitle-text">
+          Date-wise screen usage for {mode === 'kid' && loggedInKid ? loggedInKid.name : 'both kids'} in {formatMonthLabel(calendarMonth)}.
+        </p>
+
+        <div className="report-grid-wrapper">
+          <table className="report-grid">
+            <thead>
+              <tr>
+                <th>Date</th>
+                {visibleKids.map(kid => (
+                  <th key={`header-${kid.id}`}>{kid.name}</th>
+                ))}
+                <th>Day Type</th>
+              </tr>
+            </thead>
+            <tbody>
+              {monthReportRows.map(row => (
+                <tr
+                  key={`report-${row.dateString}`}
+                  className={row.dateString === selectedDate ? 'selected-row' : ''}
+                >
+                  <td>
+                    <button
+                      className="report-date-button"
+                      onClick={() => handleSelectedDateChange(row.dateString)}
+                    >
+                      {formatDateLabel(row.dateString)}
+                    </button>
+                  </td>
+                  {visibleKids.map(kid => (
+                    <td key={`${row.dateString}-${kid.id}`}>
+                      {formatMinutes(row.usage[kid.id] ?? 0)}
+                    </td>
+                  ))}
+                  <td>{getDayType(dateFromString(row.dateString)) === 'school' ? 'School Day' : 'Break / Non-School Day'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 

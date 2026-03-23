@@ -131,6 +131,118 @@ button.secondary {
   margin: 6px 0;
 }
 
+.calendar-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin: 20px 0 14px;
+  flex-wrap: wrap;
+}
+
+.calendar-toolbar h3 {
+  margin: 0 0 4px;
+}
+
+.calendar-weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.calendar-weekdays {
+  margin-bottom: 10px;
+}
+
+.calendar-weekday {
+  text-align: center;
+  font-weight: 700;
+  color: #52607a;
+}
+
+.calendar-cell {
+  min-height: 130px;
+  border: 1px solid #d7deea;
+  border-radius: 12px;
+  padding: 12px;
+  background: #f8fbff;
+  color: #1e293b;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.calendar-cell.empty {
+  background: transparent;
+  border-style: dashed;
+  cursor: default;
+}
+
+.calendar-cell.selected {
+  border-color: #2563eb;
+  box-shadow: inset 0 0 0 2px #2563eb;
+  background: #eef4ff;
+}
+
+.calendar-cell.today {
+  background: #edfdf3;
+}
+
+.calendar-day-number {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.calendar-usage-line {
+  display: block;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.report-grid-wrapper {
+  overflow-x: auto;
+}
+
+.report-grid {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 640px;
+}
+
+.report-grid th,
+.report-grid td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 12px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.report-grid th {
+  background: #f8fafc;
+  color: #334155;
+}
+
+.report-grid .selected-row {
+  background: #eef4ff;
+}
+
+.report-date-button {
+  margin-top: 0;
+  padding: 0;
+  min-height: 0;
+  background: transparent;
+  color: #2563eb;
+  text-align: left;
+  font: inherit;
+}
+
+.report-date-button:hover {
+  text-decoration: underline;
+}
+
 input,
 select {
   margin-bottom: 10px;
@@ -206,6 +318,18 @@ button.secondary {
 @media (max-width: 640px) {
   .app {
     padding: 16px;
+  }
+
+  .calendar-weekdays {
+    display: none;
+  }
+
+  .calendar-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .calendar-cell {
+    min-height: auto;
   }
 
   .button-row button {
