@@ -15,8 +15,11 @@ const DEFAULT_SETTINGS = {
   parentPasscode: '1234',
   schoolLimitMinutes: 120,
   breakLimitMinutes: 180,
+  rewardMinutes: 10,
+  penaltyMinutes: 5,
   schoolDays: [1, 2, 3, 4, 5],
-  soundEnabled: true
+  soundEnabled: true,
+  timeAdjustments: []
 }
 
 let databasePromise
@@ -30,11 +33,16 @@ function normalizeSettingValue(value) {
 }
 
 function parseSettingValue(key, value) {
-  if (key === 'schoolDays') {
+  if (key === 'schoolDays' || key === 'timeAdjustments') {
     return JSON.parse(value)
   }
 
-  if (key === 'schoolLimitMinutes' || key === 'breakLimitMinutes') {
+  if (
+    key === 'schoolLimitMinutes' ||
+    key === 'breakLimitMinutes' ||
+    key === 'rewardMinutes' ||
+    key === 'penaltyMinutes'
+  ) {
     return Number(value)
   }
 

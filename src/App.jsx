@@ -8,6 +8,8 @@ const DEFAULT_KIDS = [
 
 const DEFAULT_SCHOOL_LIMIT = 120
 const DEFAULT_BREAK_LIMIT = 180
+const DEFAULT_REWARD_MINUTES = 10
+const DEFAULT_PENALTY_MINUTES = 5
 const WARNING_MINUTES = 15
 const DEFAULT_PARENT_PASSCODE = '1234'
 const API_POLL_INTERVAL = 15000
@@ -37,6 +39,14 @@ function formatMinutes(minutes) {
   const h = Math.floor(safe / 60)
   const m = safe % 60
   return `${h}h ${m}m`
+}
+
+function formatSignedMinutes(minutes) {
+  if (minutes < 0) {
+    return `-${formatMinutes(Math.abs(minutes))}`
+  }
+
+  return formatMinutes(minutes)
 }
 
 function todayString() {
@@ -104,10 +114,29 @@ function generateId(prefix = 'id') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+function createSettingsDraft({
+  parentPasscode = DEFAULT_PARENT_PASSCODE,
+  schoolLimitMinutes = DEFAULT_SCHOOL_LIMIT,
+  breakLimitMinutes = DEFAULT_BREAK_LIMIT,
+  rewardMinutes = DEFAULT_REWARD_MINUTES,
+  penaltyMinutes = DEFAULT_PENALTY_MINUTES,
+  schoolDays = [1, 2, 3, 4, 5],
+  soundEnabled = true
+} = {}) {
+  return {
+    parentPasscode,
+    schoolLimitMinutes,
+    breakLimitMinutes,
+    rewardMinutes,
+    penaltyMinutes,
+    schoolDays,
+    soundEnabled
+  }
+}
+
 export default function App() {
   const [mode, setMode] = useState('kid')
   const [apiAvailable, setApiAvailable] = useState(false)
-  const [isHydrated, setIsHydrated] = useState(false)
 
   const [kids, setKids] = useState(() => {
     const saved = localStorage.getItem('screen-time-kids')
@@ -149,6 +178,44 @@ const [breakLimitMinutes, setBreakLimitMinutes] = useState(() => {
   const saved = localStorage.getItem('screen-time-break-limit')
   return saved ? JSON.parse(saved) : DEFAULT_BREAK_LIMIT
 })
+const [rewardMinutes, setRewardMinutes] = useState(() => {
+  const saved = localStorage.getItem('screen-time-reward-minutes')
+  return saved ? JSON.parse(saved) : DEFAULT_REWARD_MINUTES
+})
+const [penaltyMinutes, setPenaltyMinutes] = useState(() => {
+  const saved = localStorage.getItem('screen-time-penalty-minutes')
+  return saved ? JSON.parse(saved) : DEFAULT_PENALTY_MINUTES
+})
+const [timeAdjustments, setTimeAdjustments] = useState(() => {
+  const saved = localStorage.getItem('screen-time-time-adjustments')
+  return saved ? JSON.parse(saved) : []
+})
+  const [settingsDraft, setSettingsDraft] = useState(() =>
+    createSettingsDraft({
+      parentPasscode: localStorage.getItem('screen-time-parent-passcode')
+        ? JSON.parse(localStorage.getItem('screen-time-parent-passcode'))
+        : DEFAULT_PARENT_PASSCODE,
+      schoolLimitMinutes: localStorage.getItem('screen-time-school-limit')
+        ? JSON.parse(localStorage.getItem('screen-time-school-limit'))
+        : DEFAULT_SCHOOL_LIMIT,
+      breakLimitMinutes: localStorage.getItem('screen-time-break-limit')
+        ? JSON.parse(localStorage.getItem('screen-time-break-limit'))
+        : DEFAULT_BREAK_LIMIT,
+      rewardMinutes: localStorage.getItem('screen-time-reward-minutes')
+        ? JSON.parse(localStorage.getItem('screen-time-reward-minutes'))
+        : DEFAULT_REWARD_MINUTES,
+      penaltyMinutes: localStorage.getItem('screen-time-penalty-minutes')
+        ? JSON.parse(localStorage.getItem('screen-time-penalty-minutes'))
+        : DEFAULT_PENALTY_MINUTES,
+      schoolDays: localStorage.getItem('screen-time-school-days')
+        ? JSON.parse(localStorage.getItem('screen-time-school-days'))
+        : [1, 2, 3, 4, 5],
+      soundEnabled: localStorage.getItem('screen-time-sound-enabled')
+        ? JSON.parse(localStorage.getItem('screen-time-sound-enabled'))
+        : true
+    })
+  )
+  const [isSavingSettings, setIsSavingSettings] = useState(false)
   const [enteredParentPasscode, setEnteredParentPasscode] = useState('')
   const [parentUnlocked, setParentUnlocked] = useState(false)
 
@@ -203,11 +270,27 @@ const [breakLimitMinutes, setBreakLimitMinutes] = useState(() => {
 
       setKids(kidsData)
       setSessions(sessionsData)
-      setSchoolDays(settingsData.schoolDays ?? [1, 2, 3, 4, 5])
-      setParentPasscode(settingsData.parentPasscode ?? DEFAULT_PARENT_PASSCODE)
-      setSchoolLimitMinutes(settingsData.schoolLimitMinutes ?? DEFAULT_SCHOOL_LIMIT)
-      setBreakLimitMinutes(settingsData.breakLimitMinutes ?? DEFAULT_BREAK_LIMIT)
-      setSoundEnabled(settingsData.soundEnabled ?? true)
+      const nextSettings = createSettingsDraft({
+        schoolDays: settingsData.schoolDays ?? [1, 2, 3, 4, 5],
+        parentPasscode: settingsData.parentPasscode ?? DEFAULT_PARENT_PASSCODE,
+        schoolLimitMinutes: settingsData.schoolLimitMinutes ?? DEFAULT_SCHOOL_LIMIT,
+        breakLimitMinutes: settingsData.breakLimitMinutes ?? DEFAULT_BREAK_LIMIT,
+        rewardMinutes: settingsData.rewardMinutes ?? DEFAULT_REWARD_MINUTES,
+        penaltyMinutes: settingsData.penaltyMinutes ?? DEFAULT_PENALTY_MINUTES,
+        soundEnabled: settingsData.soundEnabled ?? true
+      })
+
+      setSchoolDays(nextSettings.schoolDays)
+      setParentPasscode(nextSettings.parentPasscode)
+      setSchoolLimitMinutes(nextSettings.schoolLimitMinutes)
+      setBreakLimitMinutes(nextSettings.breakLimitMinutes)
+      setRewardMinutes(nextSettings.rewardMinutes)
+      setPenaltyMinutes(nextSettings.penaltyMinutes)
+      setSoundEnabled(nextSettings.soundEnabled)
+      setTimeAdjustments(settingsData.timeAdjustments ?? [])
+      setSettingsDraft(currentDraft =>
+        parentUnlocked && settingsDirty ? currentDraft : nextSettings
+      )
       setApiAvailable(true)
       return true
     } catch {
@@ -221,8 +304,6 @@ const [breakLimitMinutes, setBreakLimitMinutes] = useState(() => {
       }
 
       return false
-    } finally {
-      setIsHydrated(true)
     }
   }
 
@@ -262,8 +343,20 @@ useEffect(() => {
 }, [breakLimitMinutes])
 
 useEffect(() => {
+  localStorage.setItem('screen-time-reward-minutes', JSON.stringify(rewardMinutes))
+}, [rewardMinutes])
+
+useEffect(() => {
+  localStorage.setItem('screen-time-penalty-minutes', JSON.stringify(penaltyMinutes))
+}, [penaltyMinutes])
+
+useEffect(() => {
   localStorage.setItem('screen-time-sound-enabled', JSON.stringify(soundEnabled))
 }, [soundEnabled])
+
+useEffect(() => {
+  localStorage.setItem('screen-time-time-adjustments', JSON.stringify(timeAdjustments))
+}, [timeAdjustments])
 
   useEffect(() => {
     if (!apiAvailable) return undefined
@@ -275,41 +368,35 @@ useEffect(() => {
     return () => clearInterval(interval)
   }, [apiAvailable])
 
-  useEffect(() => {
-    if (!apiAvailable || !isHydrated) return
-
-    fetchJson('/api/settings', {
-      method: 'PUT',
-      body: JSON.stringify({
-        parentPasscode,
-        schoolLimitMinutes,
-        breakLimitMinutes,
-        schoolDays,
-        soundEnabled
-      })
-    }).catch(error => {
-      console.error('Failed to sync settings:', error)
-    })
-  }, [
-    apiAvailable,
-    isHydrated,
-    parentPasscode,
-    schoolLimitMinutes,
-    breakLimitMinutes,
-    schoolDays,
-    soundEnabled
-  ])
-
   function getDayType(date = new Date()) {
     const day = date.getDay()
     return schoolDays.includes(day) ? 'school' : 'weekend'
   }
 
-function getDailyLimit(date = new Date()) {
-  return getDayType(date) === 'school'
-    ? Number(schoolLimitMinutes)
-    : Number(breakLimitMinutes)
-}
+  function getBaseDailyLimit(date = new Date()) {
+    return getDayType(date) === 'school'
+      ? Number(schoolLimitMinutes)
+      : Number(breakLimitMinutes)
+  }
+
+  function getBalanceBeforeDate(kidId, dateString) {
+    return timeAdjustments
+      .filter(adjustment => adjustment.kidId === kidId && adjustment.date < dateString)
+      .reduce((total, adjustment) => total + Number(adjustment.minutesDelta || 0), 0)
+  }
+
+  function getCurrentRewardBalance(kidId) {
+    return timeAdjustments
+      .filter(adjustment => adjustment.kidId === kidId)
+      .reduce((total, adjustment) => total + Number(adjustment.minutesDelta || 0), 0)
+  }
+
+  function getEffectiveDailyLimitForDate(kidId, dateString) {
+    const baseLimit = getBaseDailyLimit(dateFromString(dateString))
+    const carryForward = getBalanceBeforeDate(kidId, dateString)
+
+    return Math.max(0, baseLimit + carryForward)
+  }
 
   function getActiveSession(kidId) {
     return sessions.find(session => session.kidId === kidId && !session.endTime)
@@ -338,7 +425,54 @@ function getDailyLimit(date = new Date()) {
   }
 
   function getRemainingMinutes(kidId, date = new Date()) {
-    return getDailyLimit(date) - getUsedMinutesToday(kidId)
+    const dateString = date.toISOString().slice(0, 10)
+    return getRemainingMinutesForDate(kidId, dateString)
+  }
+
+  function getRemainingMinutesForDate(kidId, dateString) {
+    return getEffectiveDailyLimitForDate(kidId, dateString) - getUsedMinutesForDate(kidId, dateString)
+  }
+
+  function getOvertimeMinutesForDate(kidId, dateString) {
+    return Math.max(0, getUsedMinutesForDate(kidId, dateString) - getEffectiveDailyLimitForDate(kidId, dateString))
+  }
+
+  async function syncTimeAdjustments(nextAdjustments) {
+    setTimeAdjustments(nextAdjustments)
+
+    if (!apiAvailable) {
+      return
+    }
+
+    try {
+      await fetchJson('/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          timeAdjustments: nextAdjustments
+        })
+      })
+    } catch (error) {
+      console.error('Failed to sync time adjustments:', error)
+      showInfoPopup(
+        'Could Not Save Reward Update',
+        'The reward or penalty change could not be synced to the shared backend.'
+      )
+    }
+  }
+
+  async function recordTimeAdjustment({ kidId, type, minutesDelta, overtimeMinutes = 0, sessionId }) {
+    const entry = {
+      id: generateId('adjustment'),
+      kidId,
+      type,
+      minutesDelta,
+      overtimeMinutes,
+      sessionId,
+      date: todayString(),
+      createdAt: new Date().toISOString()
+    }
+
+    await syncTimeAdjustments([...timeAdjustments, entry])
   }
 
   function playSound(kind = 'alert') {
@@ -401,34 +535,6 @@ function closePopup() {
   })
 }
 
-  async function stopActiveSessionForKid(kidId) {
-    const activeSession = getActiveSession(kidId)
-    if (!activeSession) return
-
-    const stopTime = new Date().toISOString()
-
-    if (apiAvailable) {
-      try {
-        await fetchJson(`/api/sessions/${activeSession.id}/stop`, {
-          method: 'PATCH',
-          body: JSON.stringify({ endTime: stopTime })
-        })
-        await refreshBackendData()
-        return
-      } catch (error) {
-        console.error('Failed to stop shared session:', error)
-      }
-    }
-
-    setSessions(prev =>
-      prev.map(session =>
-        session.kidId === kidId && !session.endTime
-          ? { ...session, endTime: stopTime }
-          : session
-      )
-    )
-  }
-
   useEffect(() => {
     const activeSessions = sessions.filter(s => !s.endTime)
 
@@ -445,18 +551,17 @@ function closePopup() {
         showPopup(
           'finished',
           'Time Is Up',
-          `${kid.name} has reached the screen time limit.`
+          `${kid.name} has reached the screen time limit. Overtime is now being tracked.`
         )
         sessionStorage.setItem(finishedKey, 'shown')
-        stopActiveSessionForKid(kid.id)
         return
       }
 
       if (remaining <= WARNING_MINUTES && !sessionStorage.getItem(warningKey)) {
         showPopup(
           'warning',
-          'Almost Time Up',
-          `${kid.name} has only ${formatMinutes(remaining)} left today.`
+          'Wrap-Up Reminder',
+          `${kid.name} has ${formatMinutes(remaining)} left today. Please start wrapping things up.`
         )
         sessionStorage.setItem(warningKey, 'shown')
       }
@@ -504,7 +609,7 @@ function closePopup() {
     }
 
     const used = getUsedMinutesToday(loggedInKid.id)
-    const limit = getDailyLimit()
+    const limit = getEffectiveDailyLimitForDate(loggedInKid.id, todayString())
 
     if (used >= limit) {
       showInfoPopup('Limit Reached', 'Today’s screen time limit is already finished.')
@@ -556,6 +661,11 @@ function closePopup() {
       return
     }
 
+    const overtimeMinutes = getOvertimeMinutesForDate(loggedInKid.id, todayString())
+    const remainingMinutes = Math.max(0, getRemainingMinutesForDate(loggedInKid.id, todayString()))
+    const earnedReward = remainingMinutes > 0 ? Number(rewardMinutes) : 0
+    const penaltyApplied = overtimeMinutes > 0 ? Number(penaltyMinutes) : 0
+
     if (apiAvailable) {
       const stopTime = new Date().toISOString()
 
@@ -572,11 +682,39 @@ function closePopup() {
           method: 'PATCH',
           body: JSON.stringify({ endTime: stopTime })
         })
-        playSound('stop')
-        showInfoPopup('Session Stopped', `${loggedInKid.name}'s screen time session has stopped.`, {
-          sound: false
-        })
         await refreshBackendData()
+
+        if (earnedReward > 0) {
+          await recordTimeAdjustment({
+            kidId: loggedInKid.id,
+            type: 'reward',
+            minutesDelta: earnedReward,
+            sessionId: active.id
+          })
+        }
+
+        if (penaltyApplied > 0) {
+          await recordTimeAdjustment({
+            kidId: loggedInKid.id,
+            type: 'penalty',
+            minutesDelta: -penaltyApplied,
+            overtimeMinutes,
+            sessionId: active.id
+          })
+        }
+
+        playSound('stop')
+        showInfoPopup(
+          'Session Stopped',
+          earnedReward > 0
+            ? `${loggedInKid.name} stopped in time and earned ${formatMinutes(earnedReward)} extra for future days.`
+            : penaltyApplied > 0
+              ? `${loggedInKid.name} went over by ${formatMinutes(overtimeMinutes)}. ${formatMinutes(penaltyApplied)} will be deducted from future days.`
+              : `${loggedInKid.name}'s screen time session has stopped.`,
+          {
+            sound: false
+          }
+        )
         return
       } catch (error) {
         await refreshBackendData()
@@ -592,19 +730,135 @@ function closePopup() {
           : session
       )
     )
+
+    if (earnedReward > 0) {
+      await recordTimeAdjustment({
+        kidId: loggedInKid.id,
+        type: 'reward',
+        minutesDelta: earnedReward,
+        sessionId: active.id
+      })
+    }
+
+    if (penaltyApplied > 0) {
+      await recordTimeAdjustment({
+        kidId: loggedInKid.id,
+        type: 'penalty',
+        minutesDelta: -penaltyApplied,
+        overtimeMinutes,
+        sessionId: active.id
+      })
+    }
+
     playSound('stop')
-    showInfoPopup('Session Stopped', `${loggedInKid.name}'s screen time session has stopped.`, {
-      sound: false
-    })
+    showInfoPopup(
+      'Session Stopped',
+      earnedReward > 0
+        ? `${loggedInKid.name} stopped in time and earned ${formatMinutes(earnedReward)} extra for future days.`
+        : penaltyApplied > 0
+          ? `${loggedInKid.name} went over by ${formatMinutes(overtimeMinutes)}. ${formatMinutes(penaltyApplied)} will be deducted from future days.`
+          : `${loggedInKid.name}'s screen time session has stopped.`,
+      {
+        sound: false
+      }
+    )
   }
 
   function toggleSchoolDay(dayNumber) {
-    setSchoolDays(prev => {
-      if (prev.includes(dayNumber)) {
-        return prev.filter(day => day !== dayNumber).sort()
+    setSettingsDraft(prev => {
+      const nextSchoolDays = prev.schoolDays.includes(dayNumber)
+        ? prev.schoolDays.filter(day => day !== dayNumber).sort()
+        : [...prev.schoolDays, dayNumber].sort()
+
+      return {
+        ...prev,
+        schoolDays: nextSchoolDays
       }
-      return [...prev, dayNumber].sort()
     })
+  }
+
+  async function saveParentSettings() {
+    const nextSettings = createSettingsDraft({
+      parentPasscode: settingsDraft.parentPasscode.trim(),
+      schoolLimitMinutes: Number(settingsDraft.schoolLimitMinutes),
+      breakLimitMinutes: Number(settingsDraft.breakLimitMinutes),
+      rewardMinutes: Number(settingsDraft.rewardMinutes),
+      penaltyMinutes: Number(settingsDraft.penaltyMinutes),
+      schoolDays: [...settingsDraft.schoolDays].sort(),
+      soundEnabled: settingsDraft.soundEnabled
+    })
+
+    if (!nextSettings.parentPasscode) {
+      showInfoPopup('Missing Passcode', 'Enter a parent passcode before saving.')
+      return
+    }
+
+    if (Number.isNaN(nextSettings.schoolLimitMinutes) || nextSettings.schoolLimitMinutes < 0) {
+      showInfoPopup('Invalid School Limit', 'Enter a valid school day limit in minutes.')
+      return
+    }
+
+    if (Number.isNaN(nextSettings.breakLimitMinutes) || nextSettings.breakLimitMinutes < 0) {
+      showInfoPopup('Invalid Break Limit', 'Enter a valid break day limit in minutes.')
+      return
+    }
+
+    if (Number.isNaN(nextSettings.rewardMinutes) || nextSettings.rewardMinutes < 0) {
+      showInfoPopup('Invalid Reward', 'Enter a valid reward value in minutes.')
+      return
+    }
+
+    if (Number.isNaN(nextSettings.penaltyMinutes) || nextSettings.penaltyMinutes < 0) {
+      showInfoPopup('Invalid Penalty', 'Enter a valid penalty value in minutes.')
+      return
+    }
+
+    setIsSavingSettings(true)
+
+    try {
+      if (apiAvailable) {
+        const savedSettings = await fetchJson('/api/settings', {
+          method: 'PUT',
+          body: JSON.stringify(nextSettings)
+        })
+
+        const syncedSettings = createSettingsDraft({
+          parentPasscode: savedSettings.parentPasscode ?? nextSettings.parentPasscode,
+          schoolLimitMinutes: savedSettings.schoolLimitMinutes ?? nextSettings.schoolLimitMinutes,
+          breakLimitMinutes: savedSettings.breakLimitMinutes ?? nextSettings.breakLimitMinutes,
+          rewardMinutes: savedSettings.rewardMinutes ?? nextSettings.rewardMinutes,
+          penaltyMinutes: savedSettings.penaltyMinutes ?? nextSettings.penaltyMinutes,
+          schoolDays: savedSettings.schoolDays ?? nextSettings.schoolDays,
+          soundEnabled: savedSettings.soundEnabled ?? nextSettings.soundEnabled
+        })
+
+        setParentPasscode(syncedSettings.parentPasscode)
+        setSchoolLimitMinutes(syncedSettings.schoolLimitMinutes)
+        setBreakLimitMinutes(syncedSettings.breakLimitMinutes)
+        setRewardMinutes(syncedSettings.rewardMinutes)
+        setPenaltyMinutes(syncedSettings.penaltyMinutes)
+        setSchoolDays(syncedSettings.schoolDays)
+        setSoundEnabled(syncedSettings.soundEnabled)
+        setSettingsDraft(syncedSettings)
+      } else {
+        setParentPasscode(nextSettings.parentPasscode)
+        setSchoolLimitMinutes(nextSettings.schoolLimitMinutes)
+        setBreakLimitMinutes(nextSettings.breakLimitMinutes)
+        setRewardMinutes(nextSettings.rewardMinutes)
+        setPenaltyMinutes(nextSettings.penaltyMinutes)
+        setSchoolDays(nextSettings.schoolDays)
+        setSoundEnabled(nextSettings.soundEnabled)
+        setSettingsDraft(nextSettings)
+      }
+
+      showInfoPopup('Settings Saved', 'Parent configuration has been saved successfully.', {
+        sound: false
+      })
+    } catch (error) {
+      showInfoPopup('Could Not Save Settings', error.message)
+    } finally {
+      setIsSavingSettings(false)
+    }
   }
 
   async function addKid() {
@@ -673,38 +927,43 @@ function closePopup() {
   }
 
   const dashboard = useMemo(() => {
-    const limit = getDailyLimit()
-
     return kids.map(kid => {
       const used = getUsedMinutesToday(kid.id)
-      const remaining = Math.max(0, limit - used)
+      const effectiveLimit = getEffectiveDailyLimitForDate(kid.id, todayString())
+      const remaining = Math.max(0, effectiveLimit - used)
+      const overtime = Math.max(0, used - effectiveLimit)
 
       return {
         ...kid,
         used,
+        effectiveLimit,
         remaining,
+        overtime,
+        rewardBalance: getCurrentRewardBalance(kid.id),
         active: !!getActiveSession(kid.id)
       }
     })
-}, [kids, sessions, tick, schoolDays, schoolLimitMinutes, breakLimitMinutes])
+}, [kids, sessions, tick, schoolDays, schoolLimitMinutes, breakLimitMinutes, timeAdjustments])
 
   const selectedDateDashboard = useMemo(() => {
-    const selectedDateObject = dateFromString(selectedDate)
-    const limit = getDailyLimit(selectedDateObject)
-
     return kids.map(kid => {
       const used = getUsedMinutesForDate(kid.id, selectedDate)
-      const remaining = Math.max(0, limit - used)
+      const effectiveLimit = getEffectiveDailyLimitForDate(kid.id, selectedDate)
+      const remaining = Math.max(0, effectiveLimit - used)
+      const overtime = Math.max(0, used - effectiveLimit)
       const active = selectedDate === todayString() && !!getActiveSession(kid.id)
 
       return {
         ...kid,
         used,
+        effectiveLimit,
         remaining,
+        overtime,
+        rewardBalance: getCurrentRewardBalance(kid.id),
         active
       }
     })
-  }, [kids, selectedDate, sessions, tick, schoolDays, schoolLimitMinutes, breakLimitMinutes])
+  }, [kids, selectedDate, sessions, tick, schoolDays, schoolLimitMinutes, breakLimitMinutes, timeAdjustments])
 
   const visibleKids = useMemo(() => {
     if (mode === 'kid' && loggedInKid) {
@@ -738,7 +997,10 @@ function closePopup() {
   const monthReportRows = useMemo(() => {
     return calendarDays.map(day => {
       const usage = visibleKids.reduce((row, kid) => {
-        row[kid.id] = usageByKidAndDate[kid.id]?.[day.dateString] ?? 0
+        row[kid.id] = {
+          used: usageByKidAndDate[kid.id]?.[day.dateString] ?? 0,
+          overtime: getOvertimeMinutesForDate(kid.id, day.dateString)
+        }
         return row
       }, {})
 
@@ -747,7 +1009,7 @@ function closePopup() {
         usage
       }
     })
-  }, [calendarDays, usageByKidAndDate, visibleKids])
+  }, [calendarDays, usageByKidAndDate, visibleKids, timeAdjustments])
 
   const recentSessions = [...sessions]
     .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
@@ -771,7 +1033,38 @@ function closePopup() {
       }
     })
 
+  const recentAdjustments = [...timeAdjustments]
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 10)
+    .map(adjustment => {
+      const kid = kids.find(item => item.id === adjustment.kidId)
+      return {
+        ...adjustment,
+        kidName: kid?.name ?? 'Unknown'
+      }
+    })
+
   const loggedInKidActiveSession = loggedInKid ? getActiveSession(loggedInKid.id) : null
+  const settingsDirty = useMemo(() => {
+    return (
+      settingsDraft.parentPasscode !== parentPasscode ||
+      Number(settingsDraft.schoolLimitMinutes) !== Number(schoolLimitMinutes) ||
+      Number(settingsDraft.breakLimitMinutes) !== Number(breakLimitMinutes) ||
+      Number(settingsDraft.rewardMinutes) !== Number(rewardMinutes) ||
+      Number(settingsDraft.penaltyMinutes) !== Number(penaltyMinutes) ||
+      settingsDraft.soundEnabled !== soundEnabled ||
+      JSON.stringify(settingsDraft.schoolDays) !== JSON.stringify(schoolDays)
+    )
+  }, [
+    breakLimitMinutes,
+    penaltyMinutes,
+    parentPasscode,
+    rewardMinutes,
+    schoolDays,
+    schoolLimitMinutes,
+    settingsDraft,
+    soundEnabled
+  ])
 
   function handleSelectedDateChange(nextDate) {
     setSelectedDate(nextDate)
@@ -797,7 +1090,7 @@ function closePopup() {
     <p className="subtitle">
   {getDayType() === 'school'
     ? `School day limit: ${formatMinutes(schoolLimitMinutes)}`
-    : `Break / non-school day limit: ${formatMinutes(breakLimitMinutes)}`}
+    : `Break / non-school day limit: ${formatMinutes(breakLimitMinutes)}`} • Reward: +{formatMinutes(rewardMinutes)} • Penalty: -{formatMinutes(penaltyMinutes)}
 </p>
 
       <p className={`sync-status ${apiAvailable ? 'online' : 'offline'}`}>
@@ -852,7 +1145,10 @@ function closePopup() {
             <div className="card">
               <h2>Welcome, {loggedInKid.name}</h2>
               <p>Used today: {formatMinutes(getUsedMinutesToday(loggedInKid.id))}</p>
+              <p>Today&apos;s limit: {formatMinutes(getEffectiveDailyLimitForDate(loggedInKid.id, todayString()))}</p>
               <p>Remaining today: {formatMinutes(Math.max(0, getRemainingMinutes(loggedInKid.id)))}</p>
+              <p>Overtime today: {formatMinutes(getOvertimeMinutesForDate(loggedInKid.id, todayString()))}</p>
+              <p>Reward bank for future days: {formatSignedMinutes(getCurrentRewardBalance(loggedInKid.id))}</p>
               <p>Status: {loggedInKidActiveSession ? 'Running' : 'Idle'}</p>
               {loggedInKidActiveSession && (
                 <p>Started at: {formatTime(loggedInKidActiveSession.startTime)}</p>
@@ -896,29 +1192,100 @@ function closePopup() {
                   <button className="secondary" onClick={lockParent}>Lock Parent View</button>
                 </div>
 
+                <p className={`settings-status ${settingsDirty ? 'pending' : 'saved'}`}>
+                  {settingsDirty
+                    ? 'You have unsaved parent configuration changes.'
+                    : 'Parent configuration is saved.'}
+                </p>
+
                 <label>Change Parent Passcode</label>
                 <input
                   type="text"
-                  value={parentPasscode}
-                  onChange={e => setParentPasscode(e.target.value)}
+                  value={settingsDraft.parentPasscode}
+                  onChange={e =>
+                    setSettingsDraft(prev => ({
+                      ...prev,
+                      parentPasscode: e.target.value
+                    }))
+                  }
                 />
                 <label>School Day Limit (minutes)</label>
   <input
     type="number"
     min="0"
-    value={schoolLimitMinutes}
-    onChange={e => setSchoolLimitMinutes(Number(e.target.value))}
+    value={settingsDraft.schoolLimitMinutes}
+    onChange={e =>
+      setSettingsDraft(prev => ({
+        ...prev,
+        schoolLimitMinutes: e.target.value
+      }))
+    }
   />
 
   <label>Break / Non-School Day Limit (minutes)</label>
   <input
     type="number"
     min="0"
-    value={breakLimitMinutes}
-    onChange={e => setBreakLimitMinutes(Number(e.target.value))}
+    value={settingsDraft.breakLimitMinutes}
+    onChange={e =>
+      setSettingsDraft(prev => ({
+        ...prev,
+        breakLimitMinutes: e.target.value
+      }))
+    }
   />
 
   <p>Example: 120 = 2 hours, 180 = 3 hours, 240 = 4 hours</p>
+                <label>Reward For Stopping Early (minutes)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={settingsDraft.rewardMinutes}
+                  onChange={e =>
+                    setSettingsDraft(prev => ({
+                      ...prev,
+                      rewardMinutes: e.target.value
+                    }))
+                  }
+                />
+
+                <label>Penalty For Going Over Limit (minutes)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={settingsDraft.penaltyMinutes}
+                  onChange={e =>
+                    setSettingsDraft(prev => ({
+                      ...prev,
+                      penaltyMinutes: e.target.value
+                    }))
+                  }
+                />
+
+                <div className="button-row">
+                  <button onClick={saveParentSettings} disabled={!settingsDirty || isSavingSettings}>
+                    {isSavingSettings ? 'Saving...' : 'Save Configuration'}
+                  </button>
+                  <button
+                    className="secondary"
+                    onClick={() =>
+                      setSettingsDraft(
+                        createSettingsDraft({
+                          parentPasscode,
+                          schoolLimitMinutes,
+                          breakLimitMinutes,
+                          rewardMinutes,
+                          penaltyMinutes,
+                          schoolDays,
+                          soundEnabled
+                        })
+                      )
+                    }
+                    disabled={!settingsDirty || isSavingSettings}
+                  >
+                    Reset Changes
+                  </button>
+                </div>
               </div>
 
               <div className="card">
@@ -929,7 +1296,7 @@ function closePopup() {
                   {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((label, index) => (
                     <button
                       key={label}
-                      className={schoolDays.includes(index) ? '' : 'secondary'}
+                      className={settingsDraft.schoolDays.includes(index) ? '' : 'secondary'}
                       onClick={() => toggleSchoolDay(index)}
                     >
                       {label}
@@ -969,6 +1336,8 @@ function closePopup() {
                       <h3>{kid.name}</h3>
                       <p>PIN: {kid.pin}</p>
                       <p>Used today: {formatMinutes(getUsedMinutesToday(kid.id))}</p>
+                      <p>Overtime today: {formatMinutes(getOvertimeMinutesForDate(kid.id, todayString()))}</p>
+                      <p>Reward bank: {formatSignedMinutes(getCurrentRewardBalance(kid.id))}</p>
                       <button className="secondary" onClick={() => deleteKid(kid.id)}>
                         Delete Kid
                       </button>
@@ -987,8 +1356,11 @@ function closePopup() {
           {dashboard.map(kid => (
             <div className="kid-box" key={kid.id}>
               <h3>{kid.name}</h3>
+              <p>Limit: {formatMinutes(kid.effectiveLimit)}</p>
               <p>Used: {formatMinutes(kid.used)}</p>
               <p>Remaining: {formatMinutes(kid.remaining)}</p>
+              <p>Overtime: {formatMinutes(kid.overtime)}</p>
+              <p>Reward bank: {formatSignedMinutes(kid.rewardBalance)}</p>
               <p>Status: {kid.active ? 'Running' : 'Idle'}</p>
             </div>
           ))}
@@ -1013,15 +1385,18 @@ function closePopup() {
         <div className="date-summary">
           <p><strong>Date:</strong> {formatDateLabel(selectedDate)}</p>
           <p><strong>Day Type:</strong> {getDayType(dateFromString(selectedDate)) === 'school' ? 'School Day' : 'Break / Non-School Day'}</p>
-          <p><strong>Limit:</strong> {formatMinutes(getDailyLimit(dateFromString(selectedDate)))}</p>
+          <p><strong>Base Limit:</strong> {formatMinutes(getBaseDailyLimit(dateFromString(selectedDate)))}</p>
         </div>
 
         <div className="kids-grid">
           {selectedDateDashboard.map(kid => (
             <div className="kid-box" key={`${kid.id}-${selectedDate}`}>
               <h3>{kid.name}</h3>
+              <p>Limit: {formatMinutes(kid.effectiveLimit)}</p>
               <p>Used: {formatMinutes(kid.used)}</p>
               <p>Remaining: {formatMinutes(kid.remaining)}</p>
+              <p>Overtime: {formatMinutes(kid.overtime)}</p>
+              <p>Reward bank: {formatSignedMinutes(kid.rewardBalance)}</p>
               <p>Status: {kid.active ? 'Running' : 'Idle'}</p>
             </div>
           ))}
@@ -1086,6 +1461,9 @@ function closePopup() {
                   return (
                     <span className="calendar-usage-line" key={`${day.dateString}-${kid.id}`}>
                       <strong>{kid.name}:</strong> {formatMinutes(minutes)}
+                      {getOvertimeMinutesForDate(kid.id, day.dateString) > 0
+                        ? ` • Over ${formatMinutes(getOvertimeMinutesForDate(kid.id, day.dateString))}`
+                        : ''}
                     </span>
                   )
                 })}
@@ -1128,7 +1506,10 @@ function closePopup() {
                   </td>
                   {visibleKids.map(kid => (
                     <td key={`${row.dateString}-${kid.id}`}>
-                      {formatMinutes(row.usage[kid.id] ?? 0)}
+                      {formatMinutes(row.usage[kid.id]?.used ?? 0)}
+                      {row.usage[kid.id]?.overtime > 0
+                        ? ` (Over ${formatMinutes(row.usage[kid.id].overtime)})`
+                        : ''}
                     </td>
                   ))}
                   <td>{getDayType(dateFromString(row.dateString)) === 'school' ? 'School Day' : 'Break / Non-School Day'}</td>
@@ -1137,6 +1518,26 @@ function closePopup() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="card">
+        <h2>Rewards And Penalties</h2>
+
+        {recentAdjustments.length === 0 ? (
+          <p>No rewards or penalties recorded yet.</p>
+        ) : (
+          <div className="kids-grid">
+            {recentAdjustments.map(adjustment => (
+              <div className="kid-box" key={adjustment.id}>
+                <h3>{adjustment.kidName}</h3>
+                <p>Type: {adjustment.type === 'reward' ? 'Reward' : 'Penalty'}</p>
+                <p>Change: {formatSignedMinutes(adjustment.minutesDelta)}</p>
+                <p>Date: {formatDateLabel(adjustment.date)}</p>
+                <p>Overtime: {formatMinutes(adjustment.overtimeMinutes ?? 0)}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="card">

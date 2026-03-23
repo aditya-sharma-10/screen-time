@@ -145,8 +145,11 @@ app.put('/api/settings', async (req, res, next) => {
       'parentPasscode',
       'schoolLimitMinutes',
       'breakLimitMinutes',
+      'rewardMinutes',
+      'penaltyMinutes',
       'schoolDays',
-      'soundEnabled'
+      'soundEnabled',
+      'timeAdjustments'
     ]
 
     const nextSettings = Object.fromEntries(

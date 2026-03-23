@@ -131,6 +131,26 @@ button.secondary {
   margin: 6px 0;
 }
 
+.settings-status {
+  margin: 12px 0 18px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-status.saved {
+  background: #eaf8ee;
+  color: #166534;
+  border: 1px solid #b7e4c2;
+}
+
+.settings-status.pending {
+  background: #fff7e6;
+  color: #9a6700;
+  border: 1px solid #f7d794;
+}
+
 .calendar-toolbar {
   display: flex;
   justify-content: space-between;
