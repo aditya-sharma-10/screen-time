@@ -39,3 +39,15 @@ Available routes:
 - The SQLite database file is created automatically in `data/screen-time.db`.
 - The database is seeded with the same default kids and settings your frontend currently uses.
 - The React frontend is not switched over to the API yet, so your current UI still reads from `localStorage` for now.
+
+## SMS Notifications
+
+To enable SMS alerts for the 15-minute warning and screen-limit reached messages, configure these environment variables before starting the server:
+
+```bash
+export TWILIO_ACCOUNT_SID=your_account_sid
+export TWILIO_AUTH_TOKEN=your_auth_token
+export TWILIO_FROM_NUMBER=+15551234567
+```
+
+Then enter the parent and kid phone numbers in Parent View and save the configuration.

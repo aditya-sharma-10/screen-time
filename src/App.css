@@ -63,6 +63,17 @@ label {
   font-weight: 600;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-row input {
+  width: auto;
+  margin: 0;
+}
+
 input,
 select {
   width: 100%;
@@ -110,6 +121,10 @@ button.secondary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 16px;
+}
+
+.notification-grid {
+  margin-top: 16px;
 }
 
 .kid-box {

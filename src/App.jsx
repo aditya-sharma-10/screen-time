@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 const DEFAULT_KIDS = [
@@ -12,7 +12,7 @@ const DEFAULT_REWARD_MINUTES = 10
 const DEFAULT_PENALTY_MINUTES = 5
 const WARNING_MINUTES = 15
 const DEFAULT_PARENT_PASSCODE = '1234'
-const API_POLL_INTERVAL = 15000
+const API_POLL_INTERVAL = 5000
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const SOUND_FILES = {
   alert: ['/alert.mp3'],
@@ -116,21 +116,27 @@ function generateId(prefix = 'id') {
 
 function createSettingsDraft({
   parentPasscode = DEFAULT_PARENT_PASSCODE,
+  parentPhoneNumber = '',
   schoolLimitMinutes = DEFAULT_SCHOOL_LIMIT,
   breakLimitMinutes = DEFAULT_BREAK_LIMIT,
   rewardMinutes = DEFAULT_REWARD_MINUTES,
   penaltyMinutes = DEFAULT_PENALTY_MINUTES,
   schoolDays = [1, 2, 3, 4, 5],
-  soundEnabled = true
+  soundEnabled = true,
+  smsNotificationsEnabled = false,
+  kidPhoneNumbers = {}
 } = {}) {
   return {
     parentPasscode,
+    parentPhoneNumber,
     schoolLimitMinutes,
     breakLimitMinutes,
     rewardMinutes,
     penaltyMinutes,
     schoolDays,
-    soundEnabled
+    soundEnabled,
+    smsNotificationsEnabled,
+    kidPhoneNumbers
   }
 }
 
@@ -157,6 +163,10 @@ export default function App() {
     const saved = localStorage.getItem('screen-time-parent-passcode')
     return saved ? JSON.parse(saved) : DEFAULT_PARENT_PASSCODE
   })
+const [parentPhoneNumber, setParentPhoneNumber] = useState(() => {
+  const saved = localStorage.getItem('screen-time-parent-phone-number')
+  return saved ? JSON.parse(saved) : ''
+})
 const [schoolLimitMinutes, setSchoolLimitMinutes] = useState(() => {
   const saved = localStorage.getItem('screen-time-school-limit')
   return saved ? JSON.parse(saved) : DEFAULT_SCHOOL_LIMIT
@@ -172,6 +182,14 @@ const [popup, setPopup] = useState({
 const [soundEnabled, setSoundEnabled] = useState(() => {
   const saved = localStorage.getItem('screen-time-sound-enabled')
   return saved ? JSON.parse(saved) : true
+})
+const [smsNotificationsEnabled, setSmsNotificationsEnabled] = useState(() => {
+  const saved = localStorage.getItem('screen-time-sms-notifications-enabled')
+  return saved ? JSON.parse(saved) : false
+})
+const [kidPhoneNumbers, setKidPhoneNumbers] = useState(() => {
+  const saved = localStorage.getItem('screen-time-kid-phone-numbers')
+  return saved ? JSON.parse(saved) : {}
 })
 
 const [breakLimitMinutes, setBreakLimitMinutes] = useState(() => {
@@ -195,6 +213,9 @@ const [timeAdjustments, setTimeAdjustments] = useState(() => {
       parentPasscode: localStorage.getItem('screen-time-parent-passcode')
         ? JSON.parse(localStorage.getItem('screen-time-parent-passcode'))
         : DEFAULT_PARENT_PASSCODE,
+      parentPhoneNumber: localStorage.getItem('screen-time-parent-phone-number')
+        ? JSON.parse(localStorage.getItem('screen-time-parent-phone-number'))
+        : '',
       schoolLimitMinutes: localStorage.getItem('screen-time-school-limit')
         ? JSON.parse(localStorage.getItem('screen-time-school-limit'))
         : DEFAULT_SCHOOL_LIMIT,
@@ -212,10 +233,19 @@ const [timeAdjustments, setTimeAdjustments] = useState(() => {
         : [1, 2, 3, 4, 5],
       soundEnabled: localStorage.getItem('screen-time-sound-enabled')
         ? JSON.parse(localStorage.getItem('screen-time-sound-enabled'))
-        : true
+        : true,
+      smsNotificationsEnabled: localStorage.getItem('screen-time-sms-notifications-enabled')
+        ? JSON.parse(localStorage.getItem('screen-time-sms-notifications-enabled'))
+        : false,
+      kidPhoneNumbers: localStorage.getItem('screen-time-kid-phone-numbers')
+        ? JSON.parse(localStorage.getItem('screen-time-kid-phone-numbers'))
+        : {}
     })
   )
   const [isSavingSettings, setIsSavingSettings] = useState(false)
+  const [isEditingSettings, setIsEditingSettings] = useState(false)
+  const isEditingSettingsRef = useRef(false)
+  const parentUnlockedRef = useRef(false)
   const [enteredParentPasscode, setEnteredParentPasscode] = useState('')
   const [parentUnlocked, setParentUnlocked] = useState(false)
 
@@ -273,24 +303,40 @@ const [timeAdjustments, setTimeAdjustments] = useState(() => {
       const nextSettings = createSettingsDraft({
         schoolDays: settingsData.schoolDays ?? [1, 2, 3, 4, 5],
         parentPasscode: settingsData.parentPasscode ?? DEFAULT_PARENT_PASSCODE,
+        parentPhoneNumber: settingsData.parentPhoneNumber ?? '',
         schoolLimitMinutes: settingsData.schoolLimitMinutes ?? DEFAULT_SCHOOL_LIMIT,
         breakLimitMinutes: settingsData.breakLimitMinutes ?? DEFAULT_BREAK_LIMIT,
         rewardMinutes: settingsData.rewardMinutes ?? DEFAULT_REWARD_MINUTES,
         penaltyMinutes: settingsData.penaltyMinutes ?? DEFAULT_PENALTY_MINUTES,
-        soundEnabled: settingsData.soundEnabled ?? true
+        soundEnabled: settingsData.soundEnabled ?? true,
+        smsNotificationsEnabled: settingsData.smsNotificationsEnabled ?? false,
+        kidPhoneNumbers: settingsData.kidPhoneNumbers ?? {}
       })
 
       setSchoolDays(nextSettings.schoolDays)
       setParentPasscode(nextSettings.parentPasscode)
+      setParentPhoneNumber(nextSettings.parentPhoneNumber)
       setSchoolLimitMinutes(nextSettings.schoolLimitMinutes)
       setBreakLimitMinutes(nextSettings.breakLimitMinutes)
       setRewardMinutes(nextSettings.rewardMinutes)
       setPenaltyMinutes(nextSettings.penaltyMinutes)
       setSoundEnabled(nextSettings.soundEnabled)
-      setTimeAdjustments(settingsData.timeAdjustments ?? [])
-      setSettingsDraft(currentDraft =>
-        parentUnlocked && settingsDirty ? currentDraft : nextSettings
-      )
+      setSmsNotificationsEnabled(nextSettings.smsNotificationsEnabled)
+      setKidPhoneNumbers(nextSettings.kidPhoneNumbers)
+      setTimeAdjustments([])
+      if ((settingsData.timeAdjustments ?? []).length > 0) {
+        fetchJson('/api/settings', {
+          method: 'PUT',
+          body: JSON.stringify({
+            timeAdjustments: []
+          })
+        }).catch(error => {
+          console.error('Failed to clear legacy time adjustments:', error)
+        })
+      }
+      if (!parentUnlockedRef.current || !isEditingSettingsRef.current) {
+        setSettingsDraft(nextSettings)
+      }
       setApiAvailable(true)
       return true
     } catch {
@@ -312,6 +358,14 @@ const [timeAdjustments, setTimeAdjustments] = useState(() => {
   }, [])
 
   useEffect(() => {
+    parentUnlockedRef.current = parentUnlocked
+  }, [parentUnlocked])
+
+  useEffect(() => {
+    isEditingSettingsRef.current = isEditingSettings
+  }, [isEditingSettings])
+
+  useEffect(() => {
     localStorage.setItem('screen-time-kids', JSON.stringify(kids))
   }, [kids])
 
@@ -326,6 +380,10 @@ const [timeAdjustments, setTimeAdjustments] = useState(() => {
   useEffect(() => {
     localStorage.setItem('screen-time-parent-passcode', JSON.stringify(parentPasscode))
   }, [parentPasscode])
+
+  useEffect(() => {
+    localStorage.setItem('screen-time-parent-phone-number', JSON.stringify(parentPhoneNumber))
+  }, [parentPhoneNumber])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -355,6 +413,14 @@ useEffect(() => {
 }, [soundEnabled])
 
 useEffect(() => {
+  localStorage.setItem('screen-time-sms-notifications-enabled', JSON.stringify(smsNotificationsEnabled))
+}, [smsNotificationsEnabled])
+
+useEffect(() => {
+  localStorage.setItem('screen-time-kid-phone-numbers', JSON.stringify(kidPhoneNumbers))
+}, [kidPhoneNumbers])
+
+useEffect(() => {
   localStorage.setItem('screen-time-time-adjustments', JSON.stringify(timeAdjustments))
 }, [timeAdjustments])
 
@@ -366,7 +432,12 @@ useEffect(() => {
     }, API_POLL_INTERVAL)
 
     return () => clearInterval(interval)
-  }, [apiAvailable])
+  }, [apiAvailable, parentUnlocked])
+
+  useEffect(() => {
+    if (!apiAvailable || !loggedInKid) return
+    refreshBackendData()
+  }, [apiAvailable, loggedInKid])
 
   function getDayType(date = new Date()) {
     const day = date.getDay()
@@ -379,27 +450,10 @@ useEffect(() => {
       : Number(breakLimitMinutes)
   }
 
-  function getBalanceBeforeDate(kidId, dateString) {
-    return timeAdjustments
-      .filter(adjustment => adjustment.kidId === kidId && adjustment.date < dateString)
-      .reduce((total, adjustment) => total + Number(adjustment.minutesDelta || 0), 0)
-  }
-
-  function getCurrentRewardBalance(kidId) {
-    return timeAdjustments
-      .filter(adjustment => adjustment.kidId === kidId)
-      .reduce((total, adjustment) => total + Number(adjustment.minutesDelta || 0), 0)
-  }
-
-  function getEffectiveDailyLimitForDate(kidId, dateString) {
-    const baseLimit = getBaseDailyLimit(dateFromString(dateString))
-    const carryForward = getBalanceBeforeDate(kidId, dateString)
-
-    return Math.max(0, baseLimit + carryForward)
-  }
-
   function getActiveSession(kidId) {
-    return sessions.find(session => session.kidId === kidId && !session.endTime)
+    return [...sessions]
+      .filter(session => session.kidId === kidId && !session.endTime)
+      .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))[0]
   }
 
   function getUsedMinutesToday(kidId) {
@@ -435,44 +489,6 @@ useEffect(() => {
 
   function getOvertimeMinutesForDate(kidId, dateString) {
     return Math.max(0, getUsedMinutesForDate(kidId, dateString) - getEffectiveDailyLimitForDate(kidId, dateString))
-  }
-
-  async function syncTimeAdjustments(nextAdjustments) {
-    setTimeAdjustments(nextAdjustments)
-
-    if (!apiAvailable) {
-      return
-    }
-
-    try {
-      await fetchJson('/api/settings', {
-        method: 'PUT',
-        body: JSON.stringify({
-          timeAdjustments: nextAdjustments
-        })
-      })
-    } catch (error) {
-      console.error('Failed to sync time adjustments:', error)
-      showInfoPopup(
-        'Could Not Save Reward Update',
-        'The reward or penalty change could not be synced to the shared backend.'
-      )
-    }
-  }
-
-  async function recordTimeAdjustment({ kidId, type, minutesDelta, overtimeMinutes = 0, sessionId }) {
-    const entry = {
-      id: generateId('adjustment'),
-      kidId,
-      type,
-      minutesDelta,
-      overtimeMinutes,
-      sessionId,
-      date: todayString(),
-      createdAt: new Date().toISOString()
-    }
-
-    await syncTimeAdjustments([...timeAdjustments, entry])
   }
 
   function playSound(kind = 'alert') {
@@ -526,6 +542,24 @@ function showInfoPopup(title, message, options = {}) {
   showPopup('warning', title, message, options)
 }
 
+  async function sendScreenLimitNotification(kidId, type, details = {}) {
+    if (!apiAvailable) return
+
+    try {
+      await fetchJson('/api/notifications/screen-limit', {
+        method: 'POST',
+        body: JSON.stringify({
+          kidId,
+          type,
+          date: todayString(),
+          ...details
+        })
+      })
+    } catch (error) {
+      console.error('Failed to send screen limit notification:', error)
+    }
+  }
+
 function closePopup() {
   setPopup({
     show: false,
@@ -553,6 +587,9 @@ function closePopup() {
           'Time Is Up',
           `${kid.name} has reached the screen time limit. Overtime is now being tracked.`
         )
+        sendScreenLimitNotification(kid.id, 'limit-reached', {
+          overtimeMinutes: getOvertimeMinutesForDate(kid.id, todayString())
+        })
         sessionStorage.setItem(finishedKey, 'shown')
         return
       }
@@ -563,6 +600,9 @@ function closePopup() {
           'Wrap-Up Reminder',
           `${kid.name} has ${formatMinutes(remaining)} left today. Please start wrapping things up.`
         )
+        sendScreenLimitNotification(kid.id, 'warning', {
+          remainingMinutes: Math.max(0, remaining)
+        })
         sessionStorage.setItem(warningKey, 'shown')
       }
     })
@@ -592,15 +632,93 @@ function closePopup() {
     }
 
     setParentUnlocked(true)
+    setIsEditingSettings(false)
+    parentUnlockedRef.current = true
+    isEditingSettingsRef.current = false
     setEnteredParentPasscode('')
   }
 
   function lockParent() {
     setParentUnlocked(false)
+    setIsEditingSettings(false)
+    parentUnlockedRef.current = false
+    isEditingSettingsRef.current = false
     setEnteredParentPasscode('')
   }
 
-  async function startSession() {
+  function updateSettingsDraft(updater) {
+    isEditingSettingsRef.current = true
+    setIsEditingSettings(true)
+    setSettingsDraft(prev => updater(prev))
+  }
+
+  const dailyAdjustments = useMemo(() => {
+    return kids.flatMap(kid => {
+      const dates = [...new Set(
+        sessions
+          .filter(session => session.kidId === kid.id && session.date < todayString())
+          .map(session => session.date)
+      )].sort()
+
+      let carryForward = 0
+
+      return dates.reduce((adjustments, dateString) => {
+        const baseLimit = getBaseDailyLimit(dateFromString(dateString))
+        const effectiveLimit = Math.max(0, baseLimit + carryForward)
+        const usedMinutes = sessions
+          .filter(session => session.kidId === kid.id && session.date === dateString)
+          .reduce((total, session) => {
+            const start = new Date(session.startTime)
+            const end = session.endTime ? new Date(session.endTime) : start
+            return total + Math.max(0, (end - start) / 60000)
+          }, 0)
+
+        if (usedMinutes <= 0) {
+          return adjustments
+        }
+
+        const overtimeMinutes = Math.max(0, usedMinutes - effectiveLimit)
+        const minutesDelta = overtimeMinutes > 0
+          ? -Number(penaltyMinutes)
+          : Number(rewardMinutes)
+
+        const adjustment = {
+          id: `${kid.id}-${dateString}-${overtimeMinutes > 0 ? 'penalty' : 'reward'}`,
+          kidId: kid.id,
+          type: overtimeMinutes > 0 ? 'penalty' : 'reward',
+          minutesDelta,
+          overtimeMinutes,
+          date: dateString,
+          createdAt: `${dateString}T23:59:59.000Z`
+        }
+
+        carryForward += minutesDelta
+        adjustments.push(adjustment)
+        return adjustments
+      }, [])
+    })
+  }, [kids, sessions, schoolDays, schoolLimitMinutes, breakLimitMinutes, rewardMinutes, penaltyMinutes])
+
+  function getBalanceBeforeDate(kidId, dateString) {
+    return dailyAdjustments
+      .filter(adjustment => adjustment.kidId === kidId && adjustment.date < dateString)
+      .reduce((total, adjustment) => total + Number(adjustment.minutesDelta || 0), 0)
+  }
+
+  function getCurrentRewardBalance(kidId) {
+    return dailyAdjustments
+      .filter(adjustment => adjustment.kidId === kidId)
+      .reduce((total, adjustment) => total + Number(adjustment.minutesDelta || 0), 0)
+  }
+
+  function getEffectiveDailyLimitForDate(kidId, dateString) {
+    const baseLimit = getBaseDailyLimit(dateFromString(dateString))
+    const carryForward = getBalanceBeforeDate(kidId, dateString)
+
+    return Math.max(0, baseLimit + carryForward)
+  }
+
+  async function startSession(mode = 'start') {
     if (!loggedInKid) return
 
     if (getActiveSession(loggedInKid.id)) {
@@ -633,9 +751,13 @@ function closePopup() {
           body: JSON.stringify(newSession)
         })
         playSound('start')
-        showInfoPopup('Session Started', `${loggedInKid.name}'s screen time session has started.`, {
+        showInfoPopup(
+          mode === 'restart' ? 'Session Restarted' : 'Session Started',
+          `${loggedInKid.name}'s screen time session has ${mode === 'restart' ? 'restarted' : 'started'}.`,
+          {
           sound: false
-        })
+          }
+        )
         await refreshBackendData()
         return
       } catch (error) {
@@ -647,24 +769,23 @@ function closePopup() {
 
     setSessions(prev => [...prev, newSession])
     playSound('start')
-    showInfoPopup('Session Started', `${loggedInKid.name}'s screen time session has started.`, {
-      sound: false
-    })
+    showInfoPopup(
+      mode === 'restart' ? 'Session Restarted' : 'Session Started',
+      `${loggedInKid.name}'s screen time session has ${mode === 'restart' ? 'restarted' : 'started'}.`,
+      {
+        sound: false
+      }
+    )
   }
 
-  async function stopSession() {
+  async function pauseSession() {
     if (!loggedInKid) return
 
     const active = getActiveSession(loggedInKid.id)
     if (!active) {
-      showInfoPopup('No Active Session', 'No active session found.')
+      showInfoPopup('No Active Session', 'No active session found to pause.')
       return
     }
-
-    const overtimeMinutes = getOvertimeMinutesForDate(loggedInKid.id, todayString())
-    const remainingMinutes = Math.max(0, getRemainingMinutesForDate(loggedInKid.id, todayString()))
-    const earnedReward = remainingMinutes > 0 ? Number(rewardMinutes) : 0
-    const penaltyApplied = overtimeMinutes > 0 ? Number(penaltyMinutes) : 0
 
     if (apiAvailable) {
       const stopTime = new Date().toISOString()
@@ -684,33 +805,10 @@ function closePopup() {
         })
         await refreshBackendData()
 
-        if (earnedReward > 0) {
-          await recordTimeAdjustment({
-            kidId: loggedInKid.id,
-            type: 'reward',
-            minutesDelta: earnedReward,
-            sessionId: active.id
-          })
-        }
-
-        if (penaltyApplied > 0) {
-          await recordTimeAdjustment({
-            kidId: loggedInKid.id,
-            type: 'penalty',
-            minutesDelta: -penaltyApplied,
-            overtimeMinutes,
-            sessionId: active.id
-          })
-        }
-
         playSound('stop')
         showInfoPopup(
-          'Session Stopped',
-          earnedReward > 0
-            ? `${loggedInKid.name} stopped in time and earned ${formatMinutes(earnedReward)} extra for future days.`
-            : penaltyApplied > 0
-              ? `${loggedInKid.name} went over by ${formatMinutes(overtimeMinutes)}. ${formatMinutes(penaltyApplied)} will be deducted from future days.`
-              : `${loggedInKid.name}'s screen time session has stopped.`,
+          'Session Paused',
+          `${loggedInKid.name}'s screen time session has paused. Rewards or penalties will be calculated after the day is finished.`,
           {
             sound: false
           }
@@ -731,33 +829,10 @@ function closePopup() {
       )
     )
 
-    if (earnedReward > 0) {
-      await recordTimeAdjustment({
-        kidId: loggedInKid.id,
-        type: 'reward',
-        minutesDelta: earnedReward,
-        sessionId: active.id
-      })
-    }
-
-    if (penaltyApplied > 0) {
-      await recordTimeAdjustment({
-        kidId: loggedInKid.id,
-        type: 'penalty',
-        minutesDelta: -penaltyApplied,
-        overtimeMinutes,
-        sessionId: active.id
-      })
-    }
-
     playSound('stop')
     showInfoPopup(
-      'Session Stopped',
-      earnedReward > 0
-        ? `${loggedInKid.name} stopped in time and earned ${formatMinutes(earnedReward)} extra for future days.`
-        : penaltyApplied > 0
-          ? `${loggedInKid.name} went over by ${formatMinutes(overtimeMinutes)}. ${formatMinutes(penaltyApplied)} will be deducted from future days.`
-          : `${loggedInKid.name}'s screen time session has stopped.`,
+      'Session Paused',
+      `${loggedInKid.name}'s screen time session has paused. Rewards or penalties will be calculated after the day is finished.`,
       {
         sound: false
       }
@@ -765,7 +840,7 @@ function closePopup() {
   }
 
   function toggleSchoolDay(dayNumber) {
-    setSettingsDraft(prev => {
+    updateSettingsDraft(prev => {
       const nextSchoolDays = prev.schoolDays.includes(dayNumber)
         ? prev.schoolDays.filter(day => day !== dayNumber).sort()
         : [...prev.schoolDays, dayNumber].sort()
@@ -780,12 +855,17 @@ function closePopup() {
   async function saveParentSettings() {
     const nextSettings = createSettingsDraft({
       parentPasscode: settingsDraft.parentPasscode.trim(),
+      parentPhoneNumber: settingsDraft.parentPhoneNumber.trim(),
       schoolLimitMinutes: Number(settingsDraft.schoolLimitMinutes),
       breakLimitMinutes: Number(settingsDraft.breakLimitMinutes),
       rewardMinutes: Number(settingsDraft.rewardMinutes),
       penaltyMinutes: Number(settingsDraft.penaltyMinutes),
       schoolDays: [...settingsDraft.schoolDays].sort(),
-      soundEnabled: settingsDraft.soundEnabled
+      soundEnabled: settingsDraft.soundEnabled,
+      smsNotificationsEnabled: settingsDraft.smsNotificationsEnabled,
+      kidPhoneNumbers: Object.fromEntries(
+        Object.entries(settingsDraft.kidPhoneNumbers).map(([kidId, phoneNumber]) => [kidId, phoneNumber.trim()])
+      )
     })
 
     if (!nextSettings.parentPasscode) {
@@ -824,33 +904,45 @@ function closePopup() {
 
         const syncedSettings = createSettingsDraft({
           parentPasscode: savedSettings.parentPasscode ?? nextSettings.parentPasscode,
+          parentPhoneNumber: savedSettings.parentPhoneNumber ?? nextSettings.parentPhoneNumber,
           schoolLimitMinutes: savedSettings.schoolLimitMinutes ?? nextSettings.schoolLimitMinutes,
           breakLimitMinutes: savedSettings.breakLimitMinutes ?? nextSettings.breakLimitMinutes,
           rewardMinutes: savedSettings.rewardMinutes ?? nextSettings.rewardMinutes,
           penaltyMinutes: savedSettings.penaltyMinutes ?? nextSettings.penaltyMinutes,
           schoolDays: savedSettings.schoolDays ?? nextSettings.schoolDays,
-          soundEnabled: savedSettings.soundEnabled ?? nextSettings.soundEnabled
+          soundEnabled: savedSettings.soundEnabled ?? nextSettings.soundEnabled,
+          smsNotificationsEnabled:
+            savedSettings.smsNotificationsEnabled ?? nextSettings.smsNotificationsEnabled,
+          kidPhoneNumbers: savedSettings.kidPhoneNumbers ?? nextSettings.kidPhoneNumbers
         })
 
         setParentPasscode(syncedSettings.parentPasscode)
+        setParentPhoneNumber(syncedSettings.parentPhoneNumber)
         setSchoolLimitMinutes(syncedSettings.schoolLimitMinutes)
         setBreakLimitMinutes(syncedSettings.breakLimitMinutes)
         setRewardMinutes(syncedSettings.rewardMinutes)
         setPenaltyMinutes(syncedSettings.penaltyMinutes)
         setSchoolDays(syncedSettings.schoolDays)
         setSoundEnabled(syncedSettings.soundEnabled)
+        setSmsNotificationsEnabled(syncedSettings.smsNotificationsEnabled)
+        setKidPhoneNumbers(syncedSettings.kidPhoneNumbers)
         setSettingsDraft(syncedSettings)
       } else {
         setParentPasscode(nextSettings.parentPasscode)
+        setParentPhoneNumber(nextSettings.parentPhoneNumber)
         setSchoolLimitMinutes(nextSettings.schoolLimitMinutes)
         setBreakLimitMinutes(nextSettings.breakLimitMinutes)
         setRewardMinutes(nextSettings.rewardMinutes)
         setPenaltyMinutes(nextSettings.penaltyMinutes)
         setSchoolDays(nextSettings.schoolDays)
         setSoundEnabled(nextSettings.soundEnabled)
+        setSmsNotificationsEnabled(nextSettings.smsNotificationsEnabled)
+        setKidPhoneNumbers(nextSettings.kidPhoneNumbers)
         setSettingsDraft(nextSettings)
       }
 
+      isEditingSettingsRef.current = false
+      setIsEditingSettings(false)
       showInfoPopup('Settings Saved', 'Parent configuration has been saved successfully.', {
         sound: false
       })
@@ -943,7 +1035,7 @@ function closePopup() {
         active: !!getActiveSession(kid.id)
       }
     })
-}, [kids, sessions, tick, schoolDays, schoolLimitMinutes, breakLimitMinutes, timeAdjustments])
+}, [kids, sessions, tick, schoolDays, schoolLimitMinutes, breakLimitMinutes, dailyAdjustments])
 
   const selectedDateDashboard = useMemo(() => {
     return kids.map(kid => {
@@ -963,7 +1055,7 @@ function closePopup() {
         active
       }
     })
-  }, [kids, selectedDate, sessions, tick, schoolDays, schoolLimitMinutes, breakLimitMinutes, timeAdjustments])
+  }, [kids, selectedDate, sessions, tick, schoolDays, schoolLimitMinutes, breakLimitMinutes, dailyAdjustments])
 
   const visibleKids = useMemo(() => {
     if (mode === 'kid' && loggedInKid) {
@@ -1009,7 +1101,7 @@ function closePopup() {
         usage
       }
     })
-  }, [calendarDays, usageByKidAndDate, visibleKids, timeAdjustments])
+  }, [calendarDays, usageByKidAndDate, visibleKids, dailyAdjustments])
 
   const recentSessions = [...sessions]
     .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
@@ -1033,7 +1125,7 @@ function closePopup() {
       }
     })
 
-  const recentAdjustments = [...timeAdjustments]
+  const recentAdjustments = [...dailyAdjustments]
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .slice(0, 10)
     .map(adjustment => {
@@ -1045,24 +1137,31 @@ function closePopup() {
     })
 
   const loggedInKidActiveSession = loggedInKid ? getActiveSession(loggedInKid.id) : null
+  const loggedInKidUsedToday = loggedInKid ? getUsedMinutesToday(loggedInKid.id) : 0
   const settingsDirty = useMemo(() => {
     return (
       settingsDraft.parentPasscode !== parentPasscode ||
+      settingsDraft.parentPhoneNumber !== parentPhoneNumber ||
       Number(settingsDraft.schoolLimitMinutes) !== Number(schoolLimitMinutes) ||
       Number(settingsDraft.breakLimitMinutes) !== Number(breakLimitMinutes) ||
       Number(settingsDraft.rewardMinutes) !== Number(rewardMinutes) ||
       Number(settingsDraft.penaltyMinutes) !== Number(penaltyMinutes) ||
       settingsDraft.soundEnabled !== soundEnabled ||
+      settingsDraft.smsNotificationsEnabled !== smsNotificationsEnabled ||
+      JSON.stringify(settingsDraft.kidPhoneNumbers) !== JSON.stringify(kidPhoneNumbers) ||
       JSON.stringify(settingsDraft.schoolDays) !== JSON.stringify(schoolDays)
     )
   }, [
     breakLimitMinutes,
+    kidPhoneNumbers,
     penaltyMinutes,
     parentPasscode,
+    parentPhoneNumber,
     rewardMinutes,
     schoolDays,
     schoolLimitMinutes,
     settingsDraft,
+    smsNotificationsEnabled,
     soundEnabled
   ])
 
@@ -1155,11 +1254,18 @@ function closePopup() {
               )}
 
               <div className="button-row">
-                <button onClick={startSession} disabled={!!loggedInKidActiveSession}>
-                  {loggedInKidActiveSession ? 'Session Running' : 'Start Screen Time'}
+                <button
+                  onClick={() => startSession(loggedInKidUsedToday > 0 ? 'restart' : 'start')}
+                  disabled={!!loggedInKidActiveSession}
+                >
+                  {loggedInKidActiveSession
+                    ? 'Session Running'
+                    : loggedInKidUsedToday > 0
+                      ? 'Restart Screen Time'
+                      : 'Start Screen Time'}
                 </button>
-                <button onClick={stopSession} disabled={!loggedInKidActiveSession}>
-                  Stop Screen Time
+                <button onClick={pauseSession} disabled={!loggedInKidActiveSession}>
+                  Pause Screen Time
                 </button>
                 <button className="secondary" onClick={logoutKid}>Logout</button>
               </div>
@@ -1197,25 +1303,25 @@ function closePopup() {
                     ? 'You have unsaved parent configuration changes.'
                     : 'Parent configuration is saved.'}
                 </p>
-
                 <label>Change Parent Passcode</label>
                 <input
                   type="text"
                   value={settingsDraft.parentPasscode}
                   onChange={e =>
-                    setSettingsDraft(prev => ({
+                    updateSettingsDraft(prev => ({
                       ...prev,
                       parentPasscode: e.target.value
                     }))
                   }
                 />
+
                 <label>School Day Limit (minutes)</label>
   <input
     type="number"
     min="0"
     value={settingsDraft.schoolLimitMinutes}
     onChange={e =>
-      setSettingsDraft(prev => ({
+      updateSettingsDraft(prev => ({
         ...prev,
         schoolLimitMinutes: e.target.value
       }))
@@ -1228,7 +1334,7 @@ function closePopup() {
     min="0"
     value={settingsDraft.breakLimitMinutes}
     onChange={e =>
-      setSettingsDraft(prev => ({
+      updateSettingsDraft(prev => ({
         ...prev,
         breakLimitMinutes: e.target.value
       }))
@@ -1242,7 +1348,7 @@ function closePopup() {
                   min="0"
                   value={settingsDraft.rewardMinutes}
                   onChange={e =>
-                    setSettingsDraft(prev => ({
+                    updateSettingsDraft(prev => ({
                       ...prev,
                       rewardMinutes: e.target.value
                     }))
@@ -1255,32 +1361,95 @@ function closePopup() {
                   min="0"
                   value={settingsDraft.penaltyMinutes}
                   onChange={e =>
-                    setSettingsDraft(prev => ({
+                    updateSettingsDraft(prev => ({
                       ...prev,
                       penaltyMinutes: e.target.value
                     }))
                   }
                 />
 
+	              </div>
+
+              <div className="card">
+                <h2>Notification Settings</h2>
+                <p className="subtitle-text">
+                  Add parent and kid mobile numbers here, then save to enable SMS alerts for wrap-up reminders and screen-limit messages.
+                </p>
+
+                <label>Parent Mobile Number</label>
+                <input
+                  type="tel"
+                  value={settingsDraft.parentPhoneNumber}
+                  onChange={e =>
+                    updateSettingsDraft(prev => ({
+                      ...prev,
+                      parentPhoneNumber: e.target.value
+                    }))
+                  }
+                  placeholder="+15551234567"
+                />
+
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={settingsDraft.smsNotificationsEnabled}
+                    onChange={e =>
+                      updateSettingsDraft(prev => ({
+                        ...prev,
+                        smsNotificationsEnabled: e.target.checked
+                      }))
+                    }
+                  />
+                  <span>Send SMS alerts for 15-minute warnings and limit reached messages</span>
+                </label>
+
+                <div className="kids-grid notification-grid">
+                  {kids.map(kid => (
+                    <div className="kid-box" key={`notification-${kid.id}`}>
+                      <h3>{kid.name}</h3>
+                      <label>Kid Mobile Number</label>
+                      <input
+                        type="tel"
+                        value={settingsDraft.kidPhoneNumbers[kid.id] ?? ''}
+                        onChange={e =>
+                          updateSettingsDraft(prev => ({
+                            ...prev,
+                            kidPhoneNumbers: {
+                              ...prev.kidPhoneNumbers,
+                              [kid.id]: e.target.value
+                            }
+                          }))
+                        }
+                        placeholder="+15551234567"
+                      />
+                    </div>
+                  ))}
+                </div>
+
                 <div className="button-row">
                   <button onClick={saveParentSettings} disabled={!settingsDirty || isSavingSettings}>
-                    {isSavingSettings ? 'Saving...' : 'Save Configuration'}
+                    {isSavingSettings ? 'Saving...' : 'Save Parent And Notification Settings'}
                   </button>
                   <button
                     className="secondary"
-                    onClick={() =>
+                    onClick={() => {
+                      isEditingSettingsRef.current = false
+                      setIsEditingSettings(false)
                       setSettingsDraft(
                         createSettingsDraft({
                           parentPasscode,
+                          parentPhoneNumber,
                           schoolLimitMinutes,
                           breakLimitMinutes,
                           rewardMinutes,
                           penaltyMinutes,
                           schoolDays,
-                          soundEnabled
+                          soundEnabled,
+                          smsNotificationsEnabled,
+                          kidPhoneNumbers
                         })
                       )
-                    }
+                    }}
                     disabled={!settingsDirty || isSavingSettings}
                   >
                     Reset Changes

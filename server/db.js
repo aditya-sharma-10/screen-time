@@ -13,12 +13,15 @@ const DEFAULT_KIDS = [
 
 const DEFAULT_SETTINGS = {
   parentPasscode: '1234',
+  parentPhoneNumber: '',
   schoolLimitMinutes: 120,
   breakLimitMinutes: 180,
   rewardMinutes: 10,
   penaltyMinutes: 5,
   schoolDays: [1, 2, 3, 4, 5],
   soundEnabled: true,
+  smsNotificationsEnabled: false,
+  kidPhoneNumbers: {},
   timeAdjustments: []
 }
 
@@ -33,7 +36,7 @@ function normalizeSettingValue(value) {
 }
 
 function parseSettingValue(key, value) {
-  if (key === 'schoolDays' || key === 'timeAdjustments') {
+  if (key === 'schoolDays' || key === 'timeAdjustments' || key === 'kidPhoneNumbers') {
     return JSON.parse(value)
   }
 
@@ -46,7 +49,7 @@ function parseSettingValue(key, value) {
     return Number(value)
   }
 
-  if (key === 'soundEnabled') {
+  if (key === 'soundEnabled' || key === 'smsNotificationsEnabled') {
     return value === 'true'
   }
 
@@ -108,6 +111,15 @@ async function createDatabase() {
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_logs (
+      id TEXT PRIMARY KEY,
+      kid_id TEXT NOT NULL,
+      notification_type TEXT NOT NULL,
+      date TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(kid_id, notification_type, date)
     );
   `)
 
@@ -246,4 +258,30 @@ export async function updateSettings(nextSettings) {
   }
 
   return getSettings()
+}
+
+export async function getNotificationLog(kidId, notificationType, date) {
+  const db = await getDb()
+  return db.get(
+    `
+      SELECT id, kid_id AS kidId, notification_type AS notificationType, date
+      FROM notification_logs
+      WHERE kid_id = ? AND notification_type = ? AND date = ?
+      LIMIT 1
+    `,
+    [kidId, notificationType, date]
+  )
+}
+
+export async function createNotificationLog({ id, kidId, notificationType, date }) {
+  const db = await getDb()
+  const createdAt = new Date().toISOString()
+
+  await db.run(
+    `
+      INSERT OR IGNORE INTO notification_logs (id, kid_id, notification_type, date, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `,
+    [id, kidId, notificationType, date, createdAt]
+  )
 }
